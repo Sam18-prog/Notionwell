@@ -1464,22 +1464,11 @@ export function getSession(): Session {
   try {
     const raw = localStorage.getItem(SESSION_KEY) || localStorage.getItem('studypack_session_v1');
     if (!raw) {
-      // Default session state for existing demo users
       const storedAcc = getStoredAccount();
       if (storedAcc) {
         return { isLoggedIn: true, loggedInEmail: storedAcc.email };
       }
-      // Auto-initialize demo account if first time opening app
-      const defaultAcc: Account = {
-        email: 'demo@notionwell.ai',
-        passwordHash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855', // SHA-256 for demo
-        name: 'Demo Student',
-        createdAt: new Date().toISOString(),
-      };
-      saveStoredAccount(defaultAcc);
-      const defaultSession: Session = { isLoggedIn: true, loggedInEmail: defaultAcc.email };
-      localStorage.setItem(SESSION_KEY, JSON.stringify(defaultSession));
-      return defaultSession;
+      return { isLoggedIn: false, loggedInEmail: null };
     }
     return JSON.parse(raw);
   } catch (err) {
@@ -1503,14 +1492,7 @@ function notifyAuthChange() {
 }
 
 export function getCurrentUser(): User | null {
-  if (!isBrowser()) {
-    return {
-      id: 'local-user-1',
-      name: 'Demo Student',
-      email: 'demo@notionwell.ai',
-      createdAt: new Date().toISOString(),
-    };
-  }
+  if (!isBrowser()) return null;
 
   const session = getSession();
   if (!session.isLoggedIn) return null;
@@ -1520,8 +1502,8 @@ export function getCurrentUser(): User | null {
 
   return {
     id: 'local-user-1',
-    name: account.name || 'Demo Student',
-    email: account.email || 'demo@notionwell.ai',
+    name: account.name || 'Student',
+    email: account.email || 'student@notionwell.ai',
     createdAt: account.createdAt || new Date().toISOString(),
   };
 }
@@ -1690,15 +1672,8 @@ export function resetAllAppData(): void {
     cachedUserStats = null;
     hasMigratedStorage = false;
 
-    // 3. Re-seed default user & default subjects
-    const defaultAcc: Account = {
-      email: 'demo@notionwell.ai',
-      passwordHash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      name: 'Demo Student',
-      createdAt: new Date().toISOString(),
-    };
-    saveStoredAccount(defaultAcc);
-    saveSession({ isLoggedIn: true, loggedInEmail: defaultAcc.email });
+    // 3. Reset session to logged out
+    saveSession({ isLoggedIn: false, loggedInEmail: null });
     localStorage.setItem(SUBJECTS_KEY, JSON.stringify(DEFAULT_SUBJECTS));
 
     // 4. Notify app listeners
