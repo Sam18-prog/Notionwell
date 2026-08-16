@@ -1,0 +1,131 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   NOTIONWELL — CENTRALIZED THEME TOKENS
+   ============================================================================ */
+
+:root {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Outfit', system-ui, -apple-system, sans-serif;
+
+  /* LIGHT MODE FOUNDATION (#F6F8FC Viewport, #FFFFFF Cards) */
+  --bg-app: #F6F8FC;
+  --surface: #FFFFFF;
+  --surface-elevated: #FFFFFF;
+  --surface-hover: #F8FAFC;
+
+  --primary: #2563EB;
+  --primary-hover: #1D4ED8;
+  --primary-soft: #EFF6FF;
+
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
+
+  --border: #E2E8F0;
+  --border-strong: #CBD5E1;
+
+  --success: #10B981;
+  --success-soft: #ECFDF5;
+
+  --warning: #F59E0B;
+  --warning-soft: #FFFBEB;
+
+  --danger: #EF4444;
+  --danger-soft: #FEF2F2;
+
+  --info: #2563EB;
+  --info-soft: #EFF6FF;
+
+  --shadow-card: 0 4px 20px rgba(15, 23, 42, 0.05);
+  --shadow-hover: 0 8px 28px rgba(37, 99, 235, 0.10);
+}
+
+html.dark {
+  /* DARK MODE FOUNDATION (#0B1220 Viewport, #111827 Cards) */
+  --bg-app: #0B1220;
+  --surface: #111827;
+  --surface-elevated: #172033;
+  --surface-hover: #1E293B;
+
+  --primary: #3B82F6;
+  --primary-hover: #60A5FA;
+  --primary-soft: #172554;
+
+  --text-primary: #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted: #94A3B8;
+
+  --border: #263449;
+  --border-strong: #334155;
+
+  --success: #34D399;
+  --success-soft: #052E2B;
+
+  --warning: #FBBF24;
+  --warning-soft: #422006;
+
+  --danger: #F87171;
+  --danger-soft: #450A0A;
+
+  --info: #60A5FA;
+  --info-soft: #172554;
+
+  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.25);
+  --shadow-hover: 0 8px 28px rgba(59, 130, 246, 0.15);
+}
+
+/* Base Global Viewport Styles */
+html, body {
+  background-color: var(--bg-app) !important;
+  color: var(--text-primary);
+  min-height: 100vh;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+}
+
+/* Focus Ring */
+*:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.20);
+}
+
+/* 3D Flashcard Flip Styles */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.transform-style-3d {
+  transform-style: preserve-3d;
+  transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+  transform: rotateY(180deg);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-app);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+}
