@@ -17,6 +17,7 @@ import {
   Subject,
   Deck,
   PlannerTask,
+  DashboardMetrics,
   getTodayDateString,
 } from '@/lib/app';
 import MoveDeckModal from '@/components/MoveDeckModal';
@@ -54,22 +55,20 @@ export default function DashboardPage() {
 
   const [decks, setDecks] = useState<Deck[]>([]);
   const [todayTasks, setTodayTasks] = useState<PlannerTask[]>([]);
-  const [metrics, setMetrics] = useState({
+  const [metrics, setMetrics] = useState<DashboardMetrics>({
     totalCards: 0,
+    easyCards: 0,
     masteredCards: 0,
     masteryPercentage: 0,
     cardsDueToday: 0,
     streakDays: 0,
-    weakTopics: [] as Array<{ topic: string; incorrectCount: number; accuracy?: number; totalCards?: number; deckId?: string; deckTitle?: string }>,
+    weakTopics: [],
     primaryRecommendation: {
-      type: 'empty' as 'weak_topic' | 'due_cards' | 'empty' | 'mastered',
+      type: 'empty',
       title: 'Ready to start learning?',
       description: 'Upload your notes, textbook photos, or PDF documents to generate smart flashcards and receive personalized AI recommendations.',
       actionLabel: 'Upload Notes & Create Deck',
       actionUrl: '/create',
-      topicName: undefined as string | undefined,
-      accuracy: undefined as number | undefined,
-      cardsCount: undefined as number | undefined,
     },
   });
   const [mounted, setMounted] = useState(false);

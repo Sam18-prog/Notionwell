@@ -1238,7 +1238,39 @@ export function setEli5Cache(cardId: string, text: string): void {
   }
 }
 
-export function getDashboardMetrics(subjectId?: string) {
+export interface DashboardWeakTopic {
+  topic: string;
+  incorrectCount: number;
+  correctCount?: number;
+  totalCards?: number;
+  deckId?: string;
+  deckTitle?: string;
+  accuracy?: number;
+}
+
+export interface DashboardPrimaryRecommendation {
+  type: 'weak_topic' | 'due_cards' | 'empty' | 'mastered';
+  title: string;
+  description: string;
+  topicName?: string;
+  accuracy?: number;
+  cardsCount?: number;
+  actionLabel: string;
+  actionUrl: string;
+}
+
+export interface DashboardMetrics {
+  totalCards: number;
+  easyCards?: number;
+  masteredCards: number;
+  masteryPercentage: number;
+  cardsDueToday: number;
+  streakDays: number;
+  weakTopics: DashboardWeakTopic[];
+  primaryRecommendation: DashboardPrimaryRecommendation;
+}
+
+export function getDashboardMetrics(subjectId?: string): DashboardMetrics {
   let decks = getDecks();
   if (subjectId && subjectId !== 'all') {
     decks = decks.filter((d) => d.subjectId === subjectId);

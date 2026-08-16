@@ -77,4 +77,9 @@ export {
   ensureOptionUniquenessAcrossQuiz,
 } from './app';
 
-export type { GeneratedStudyMaterial } from './app';
+export type {
+  GeneratedStudyMaterial,
+  DashboardMetrics,
+  DashboardWeakTopic,
+  DashboardPrimaryRecommendation,
+} from './app';

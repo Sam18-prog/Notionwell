@@ -12,6 +12,7 @@ import {
   AchievementBadge,
   Subject,
   Deck,
+  DashboardMetrics,
 } from '@/lib/app';
 import StudyTimeChart from '@/components/StudyTimeChart';
 import SubjectIcon from '@/components/SubjectIcon';
@@ -33,13 +34,21 @@ export default function InsightsPage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [decks, setDecks] = useState<Deck[]>([]);
   const [badges, setBadges] = useState<AchievementBadge[]>([]);
-  const [metrics, setMetrics] = useState({
+  const [metrics, setMetrics] = useState<DashboardMetrics>({
     totalCards: 0,
+    easyCards: 0,
     masteredCards: 0,
     masteryPercentage: 0,
     cardsDueToday: 0,
     streakDays: 0,
-    weakTopics: [] as Array<{ topic: string; incorrectCount: number }>,
+    weakTopics: [],
+    primaryRecommendation: {
+      type: 'empty',
+      title: 'Ready to start learning?',
+      description: 'Upload your notes, textbook photos, or PDF documents to generate smart flashcards and receive personalized AI recommendations.',
+      actionLabel: 'Upload Notes & Create Deck',
+      actionUrl: '/create',
+    },
   });
   const [mounted, setMounted] = useState(false);
 
