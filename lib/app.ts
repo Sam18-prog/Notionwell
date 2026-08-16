@@ -1684,6 +1684,7 @@ export interface GeneratedStudyMaterial {
   quiz: QuizQuestion[];
   skippedChunks?: number;
   totalChunks?: number;
+  quotaNotice?: boolean | string;
 }
 
 function getAIClientAndModel(): { client: OpenAI; model: string } | null {
@@ -2467,7 +2468,7 @@ Return ONLY valid JSON matching this schema:
     quiz = ensureOptionUniquenessAcrossQuiz([...quiz, ...offlineBackup.quiz]);
   }
 
-  return validateDeckQuality({ flashcards, quiz });
+  return validateDeckQuality({ flashcards, quiz, quotaNotice: usedQuotaFallback });
 }
 
 export async function generateStudyMaterial(
@@ -2492,6 +2493,7 @@ export async function generateStudyMaterial(
   const combinedFlashcards: Flashcard[] = [];
   const combinedQuiz: QuizQuestion[] = [];
   let skippedCount = 0;
+  let hasQuotaNotice = false;
 
   for (let i = 0; i < chunks.length; i++) {
     console.log(`[Chunk ${i + 1}/${chunks.length}]: Synthesizing section for deck ${deckId}...`);
@@ -2502,6 +2504,9 @@ export async function generateStudyMaterial(
         flashcardsPerChunk,
         quizPerChunk
       );
+      if (res.quotaNotice) {
+        hasQuotaNotice = true;
+      }
       if (res.flashcards && res.flashcards.length > 0) {
         combinedFlashcards.push(...res.flashcards.map((fc) => ({ ...fc, deckId })));
       }
@@ -2535,6 +2540,7 @@ export async function generateStudyMaterial(
     quiz: finalQuiz,
     skippedChunks: skippedCount,
     totalChunks: chunks.length,
+    quotaNotice: hasQuotaNotice,
   });
 
   console.log(
