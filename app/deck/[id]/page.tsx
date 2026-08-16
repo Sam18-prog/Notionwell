@@ -54,10 +54,7 @@ import {
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  getGlobalTimerState,
-  startGlobalTimer,
   pauseGlobalTimer,
-  resetAndSaveGlobalTimer,
 } from '@/lib/timer';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 
@@ -95,10 +92,6 @@ export default function DeckDetailPage() {
   const [loadingEli5, setLoadingEli5] = useState(false);
   const [eli5Error, setEli5Error] = useState<string | null>(null);
 
-  // SHARED TIMER ENGINE STATE
-  const [sharedTimerSeconds, setSharedTimerSeconds] = useState(0);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
-
   // QUIZ SESSION STATE
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
   const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
@@ -117,23 +110,6 @@ export default function DeckDetailPage() {
   const [examScore, setExamScore] = useState(0);
   const [examStartMs, setExamStartMs] = useState<number>(0);
   const [finalExamDuration, setFinalExamDuration] = useState<number>(0);
-
-  // SUBSCRIBE TO UNIFIED GLOBAL STUDY TIMER ENGINE
-  useEffect(() => {
-    const syncState = getGlobalTimerState();
-    setSharedTimerSeconds(syncState.seconds);
-    setIsTimerRunning(syncState.isRunning);
-
-    const handleTimerUpdate = (e: CustomEvent) => {
-      setSharedTimerSeconds(e.detail.seconds);
-      setIsTimerRunning(e.detail.isRunning);
-    };
-
-    window.addEventListener('study-timer-update', handleTimerUpdate as EventListener);
-    return () => {
-      window.removeEventListener('study-timer-update', handleTimerUpdate as EventListener);
-    };
-  }, []);
 
   const formatTimer = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -181,17 +157,6 @@ export default function DeckDetailPage() {
     }
   }, [initialMode]);
 
-  // AUTO-START SHARED TIMER ON STUDY SESSION ENTRY
-  useEffect(() => {
-    if (activeTab === 'study' && !sessionCompleted && studyCards.length > 0) {
-      startGlobalTimer();
-    } else if (activeTab === 'quiz' && !quizCompleted && quizQuestions.length > 0) {
-      startGlobalTimer();
-    } else if (activeTab === 'exam' && !examSubmitted && examItems.length > 0) {
-      startGlobalTimer();
-    }
-  }, [activeTab, sessionCompleted, quizCompleted, examSubmitted, studyCards.length, quizQuestions.length, examItems.length]);
-
   const initStudySession = (d: Deck) => {
     const queue = d.flashcards || [];
 
@@ -214,7 +179,6 @@ export default function DeckDetailPage() {
     setStudyStartMs(Date.now());
     setFinalSessionDuration(0);
 
-    startGlobalTimer();
   };
 
   const handleEndStudySession = useCallback(() => {
@@ -482,7 +446,6 @@ export default function DeckDetailPage() {
     setQuizStartMs(Date.now());
     setFinalQuizDuration(0);
 
-    startGlobalTimer();
   };
 
   const handleSelectQuizOption = (option: string) => {
@@ -549,16 +512,24 @@ export default function DeckDetailPage() {
       type: 'quiz' as const,
     }));
 
-    const allFlashcardAnswers = (d.flashcards || []).map((fc) => fc.answer.trim());
-
+    // Do not turn arbitrary flashcard answers into exam distractors. A distractor
+    // should at least assess the same topic; otherwise the answer is obvious and
+    // the resulting exam measures reading luck rather than understanding.
     const cardItems = (d.flashcards || [])
-      .filter((c) => {
-        const otherAnswers = allFlashcardAnswers.filter((a) => a !== c.answer.trim());
-        return otherAnswers.length >= 3;
-      })
       .map((c) => {
-        const otherAnswers = allFlashcardAnswers.filter((a) => a !== c.answer.trim());
-        const randomDistractors = [...otherAnswers].sort(() => Math.random() - 0.5).slice(0, 3);
+        const sameTopicAnswers = (d.flashcards || [])
+          .filter(
+            (candidate) =>
+              candidate.id !== c.id &&
+              candidate.topic.trim().toLowerCase() === c.topic.trim().toLowerCase() &&
+              candidate.answer.trim() !== c.answer.trim()
+          )
+          .map((candidate) => candidate.answer.trim());
+
+        if (sameTopicAnswers.length < 3) return null;
+        const randomDistractors = [...sameTopicAnswers]
+          .sort(() => Math.random() - 0.5)
+          .slice(0, 3);
         const opts = [c.answer, ...randomDistractors].sort(() => Math.random() - 0.5);
 
         return {
@@ -569,7 +540,8 @@ export default function DeckDetailPage() {
           topic: c.topic,
           type: 'flashcard' as const,
         };
-      });
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
 
     const combined = [...quizItems, ...cardItems];
     const shuffled = combined.sort(() => Math.random() - 0.5).slice(0, 15);
@@ -582,7 +554,6 @@ export default function DeckDetailPage() {
     setExamStartMs(Date.now());
     setFinalExamDuration(0);
 
-    startGlobalTimer();
   };
 
   const handleExamOptionSelect = (option: string) => {
@@ -897,19 +868,6 @@ export default function DeckDetailPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  {/* UNIFIED SHARED TIMER HEADER DISPLAY */}
-                  <div
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white dark:bg-[#172033] border border-[#E2E8F0] dark:border-[#263449] text-xs font-mono font-bold text-[#0F172A] dark:text-[#F8FAFC] cursor-pointer"
-                    onClick={() => {
-                      if (isTimerRunning) pauseGlobalTimer();
-                      else startGlobalTimer();
-                    }}
-                    title="Unified Study Timer (Click to Pause/Play)"
-                  >
-                    <Clock className={`w-3.5 h-3.5 ${isTimerRunning ? 'text-amber-500 animate-spin' : 'text-[#2563EB]'}`} />
-                    <span>{formatTimer(sharedTimerSeconds)}</span>
-                  </div>
-
                   <button
                     onClick={handleEndStudySession}
                     className="px-3 py-1 rounded-xl bg-[#FEF2F2] dark:bg-[#450A0A] border border-[#EF4444] text-[#EF4444] font-bold text-xs hover:bg-[#EF4444] hover:text-white transition-all"

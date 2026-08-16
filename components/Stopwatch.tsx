@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Play, Pause, Clock, Save } from 'lucide-react';
+import { Play, Pause, Clock, Square } from 'lucide-react';
 import { getTotalStudySeconds } from '@/lib/app';
 import {
   getGlobalTimerState,
@@ -35,15 +35,10 @@ export default function Stopwatch({ isCollapsed }: { isCollapsed?: boolean }) {
     };
   }, []);
 
-  const handleToggleTimer = () => {
-    if (isRunning) {
-      pauseGlobalTimer();
-    } else {
-      startGlobalTimer();
-    }
-  };
+  const handleStart = () => startGlobalTimer();
+  const handlePause = () => pauseGlobalTimer();
 
-  const handleSaveAndReset = () => {
+  const handleEnd = () => {
     resetAndSaveGlobalTimer();
     setTotalAccumulated(getTotalStudySeconds());
   };
@@ -62,7 +57,7 @@ export default function Stopwatch({ isCollapsed }: { isCollapsed?: boolean }) {
     return (
       <div
         className="p-2.5 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-white dark:bg-[#172033] flex items-center justify-center text-[#2563EB] dark:text-[#3B82F6] cursor-pointer shadow-xs"
-        onClick={handleToggleTimer}
+        onClick={isRunning ? handlePause : handleStart}
         title={`Study Timer: ${formatTime(seconds)} (${isRunning ? 'Click to Pause' : 'Click to Start'})`}
       >
         <Clock className={`w-4 h-4 ${isRunning ? 'animate-spin text-amber-500' : ''}`} />
@@ -84,35 +79,25 @@ export default function Stopwatch({ isCollapsed }: { isCollapsed?: boolean }) {
 
       <div className="flex items-center gap-1.5">
         <button
-          onClick={handleToggleTimer}
+          onClick={isRunning ? handlePause : handleStart}
           className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 text-white shadow-xs ${
             isRunning
               ? 'bg-[#F59E0B] hover:bg-[#D97706]'
               : 'bg-[#2563EB] hover:bg-[#1D4ED8] dark:bg-[#3B82F6]'
           }`}
         >
-          {isRunning ? (
-            <>
-              <Pause className="w-3.5 h-3.5 fill-white" />
-              <span>Pause</span>
-            </>
-          ) : (
-            <>
-              <Play className="w-3.5 h-3.5 fill-white" />
-              <span>Start</span>
-            </>
-          )}
+          {isRunning ? <Pause className="w-3.5 h-3.5 fill-white" /> : <Play className="w-3.5 h-3.5 fill-white" />}
+          <span>{isRunning ? 'Pause' : 'Start'}</span>
         </button>
-
-        {seconds > 0 && (
-          <button
-            onClick={handleSaveAndReset}
-            className="p-1.5 rounded-xl bg-[#ECFDF5] dark:bg-[#052E2B] border border-[#A7F3D0] dark:border-[#065F46] text-[#10B981] hover:bg-[#10B981] hover:text-white transition-all shadow-xs"
-            title="Save & Reset Timer"
-          >
-            <Save className="w-3.5 h-3.5" />
-          </button>
-        )}
+        <button
+          onClick={handleEnd}
+          disabled={!isRunning && seconds === 0}
+          className="flex-1 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 text-white shadow-xs bg-[#EF4444] hover:bg-[#DC2626] disabled:opacity-40 disabled:cursor-not-allowed"
+          title="End and save this timer session"
+        >
+          <Square className="w-3.5 h-3.5 fill-white" />
+          <span>End</span>
+        </button>
       </div>
 
       {totalAccumulated > 0 && (

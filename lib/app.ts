@@ -2262,34 +2262,26 @@ export function validateDeckQuality(material: GeneratedStudyMaterial): Generated
 }
 
 /**
- * Ensures answer options are unique across all questions in the quiz set.
- * Drops questions with duplicate options across the set instead of fabricating template text.
+ * Keeps every displayed answer option unique across a quiz. Repeated choices make
+ * later questions easier to guess and feel machine-generated, so lower-quality
+ * questions are dropped rather than showing the same distractors repeatedly.
  */
 export function ensureOptionUniquenessAcrossQuiz(quiz: QuizQuestion[]): QuizQuestion[] {
   if (!Array.isArray(quiz)) return [];
-
   const seenOptionNorms = new Set<string>();
   const uniqueQuiz: QuizQuestion[] = [];
 
-  for (const q of quiz) {
-    if (hasDuplicateOrOverlappingOptions(q.options)) continue;
+  for (const question of quiz) {
+    if (hasDuplicateOrOverlappingOptions(question.options)) continue;
+    const optionNorms = question.options.map((option) =>
+      option.toLowerCase().replace(/[^a-z0-9]/g, '')
+    );
+    if (optionNorms.some((option) => option.length > 3 && seenOptionNorms.has(option))) continue;
 
-    let hasCrossQuestionDuplicate = false;
-    for (const opt of q.options) {
-      const optNorm = opt.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (optNorm.length > 3 && seenOptionNorms.has(optNorm)) {
-        hasCrossQuestionDuplicate = true;
-        break;
-      }
-    }
-
-    if (!hasCrossQuestionDuplicate) {
-      for (const opt of q.options) {
-        const optNorm = opt.toLowerCase().replace(/[^a-z0-9]/g, '');
-        if (optNorm.length > 3) seenOptionNorms.add(optNorm);
-      }
-      uniqueQuiz.push(q);
-    }
+    optionNorms.forEach((option) => {
+      if (option.length > 3) seenOptionNorms.add(option);
+    });
+    uniqueQuiz.push(question);
   }
 
   return uniqueQuiz;
@@ -2324,6 +2316,9 @@ export async function generateSingleChunkMaterial(
   targetQuiz = 5
 ): Promise<GeneratedStudyMaterial> {
   const config = getAIClientAndModel();
+  // Ask for a small surplus: the quality pass can safely discard duplicates while
+  // still returning the requested number of unique questions.
+  const generationQuizTarget = targetQuiz + Math.max(4, Math.ceil(targetQuiz * 0.5));
 
   if (!config) {
     return validateDeckQuality(generateOfflineStudyMaterial(chunkText, deckId, targetFlashcards, targetQuiz));
@@ -2331,15 +2326,16 @@ export async function generateSingleChunkMaterial(
 
   const { client, model } = config;
 
-  const systemPrompt = `You are an expert academic professor creating study material for a student. Analyze the provided study text and synthesize exactly ${targetFlashcards} flashcards and ${targetQuiz} multiple-choice quiz questions.
+  const systemPrompt = `You are an expert instructional designer creating study material from the supplied source only. First identify the distinct concepts, definitions, relationships, processes, causes, and applications in the source. Then synthesize exactly ${targetFlashcards} flashcards and ${generationQuizTarget} multiple-choice quiz questions.
 
 CRITICAL GENERATION RULES:
-1. VARIED NATURAL QUESTIONS: Write varied, natural questions suited to each specific passage — do NOT reuse the same question opening or structure. Use diverse types: definitions ("What is X?"), mechanisms ("How does X work?"), comparisons ("How does X differ from Y?"), applications ("How is X used in Y?"), and cause/effect. NEVER quote raw section numbers, headings, or use template phrases like 'the findings on [X]'.
-2. DIRECT EXPLANATORY FLASHCARD ANSWERS: The flashcard answer must directly and specifically answer the exact question asked in 1-3 complete, clear sentences. Do NOT answer with a list of keywords, terms, or topic names separated by commas. Write the answer as a real explanation a teacher would give a student.
-3. UNIQUE QUESTION-SPECIFIC MCQ OPTIONS (UNDER 10 WORDS): Each answer option in quiz and exam questions must be a short phrase (under 10 words) that is UNIQUE to THIS specific question. Do NOT reuse the same or similar phrases as options across different questions. Distractors must be plausible, distinct short claims drawn from DIFFERENT specific facts in the text — not generic, recycled, or template options.
-4. PLAUSIBLE DISTINCT DISTRACTORS: All 4 options within a question must be clearly distinct claims, not reworded versions of the same idea.
-5. DISTINCT CONCEPTS ONLY: Every item in the set must cover a distinct concept — no duplicate or near-duplicate questions.
-6. NO BARE HEADINGS: Do NOT generate questions from bare section titles, table of contents entries, or headers/footers.
+1. SOURCE GROUNDED: Every answer, explanation, and distractor must be supported or directly contradicted by the supplied source. Never add outside facts or invent examples.
+2. VARIED, SPECIFIC QUESTIONS: Test a mixture of definition, mechanism, comparison, cause/effect, and application where the source supports them. Each question must name the actual concept it tests; never use vague templates such as "this mechanism" or "the findings on".
+3. DIRECT FLASHCARD ANSWERS: Answer the exact question in 1-3 clear sentences. Explain the relationship or reason, not just a keyword list.
+4. HIGH-QUALITY MCQS: Write one unambiguous correct answer and three plausible distractors that are clearly false for this question but belong to the same domain. Keep every option self-contained, concise, and 2-10 words long. Do not shorten an option by cutting it mid-idea.
+5. NO REPEATED OPTIONS: Do not reuse any answer option, correct answer, or distractor anywhere else in this quiz set.
+6. EXPLANATIONS: State why the correct option is correct using the source, and briefly distinguish it from the distractors when helpful.
+7. DISTINCT CONCEPTS ONLY: Every item must cover a distinct learning objective. Do not generate questions from bare headings, table-of-contents entries, or headers/footers.
 
 Return ONLY valid JSON matching this schema:
 {
@@ -2441,10 +2437,10 @@ Return ONLY valid JSON matching this schema:
         const options = item.options.map((o: any) => String(o).trim());
         const hasLongOption = options.some((opt: string) => {
           const wordCount = opt.split(/\s+/).length;
-          return wordCount > 18 || opt.length > 120 || opt.includes('\n');
+          return wordCount > 10 || opt.length > 80 || opt.includes('\n');
         });
         if (hasLongOption) {
-          console.log(`[Quiz Reject]: Option exceeds 18 words / 120 chars. Question: "${q}"`);
+          console.log(`[Quiz Reject]: Option exceeds 10 words / 80 chars. Question: "${q}"`);
           return false;
         }
         if (hasDuplicateOrOverlappingOptions(options)) {
@@ -2456,14 +2452,17 @@ Return ONLY valid JSON matching this schema:
           return false;
         }
 
-        return true;
+        const normalizedCorrect = String(item.correctAnswer || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        return options.some((option: string) => option.toLowerCase().replace(/[^a-z0-9]/g, '') === normalizedCorrect);
       })
       .map((item: any) => {
-        const options = item.options.map((o: any) => formatShortOption(String(o), 10));
-        let correctAnswer = formatShortOption(item.correctAnswer || options[0], 10);
-        if (!options.includes(correctAnswer)) {
-          correctAnswer = options[0];
-        }
+        // Preserve complete model-written options. Truncation here used to change
+        // their meaning and could turn the first option into the "correct" one.
+        const options = item.options.map((o: any) => String(o).trim());
+        const correctNorm = String(item.correctAnswer).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+        const correctAnswer = options.find(
+          (option: string) => option.toLowerCase().replace(/[^a-z0-9]/g, '') === correctNorm
+        )!;
 
         return {
           id: uuidv4(),
@@ -2486,7 +2485,8 @@ Return ONLY valid JSON matching this schema:
 
   // FAIL-SAFE BACKUP: Supplement using offline generator if cards are low
   const minRequiredCards = Math.max(6, Math.floor(targetFlashcards * 0.5));
-  if (flashcards.length < minRequiredCards || quiz.length < 3) {
+  const minRequiredQuiz = Math.max(5, Math.ceil(targetQuiz * 0.7));
+  if (flashcards.length < minRequiredCards || quiz.length < minRequiredQuiz) {
     console.log(
       `[AI Quality Gate]: Chunk yielded ${flashcards.length} flashcards & ${quiz.length} quiz questions. Supplementing with offline engine...`
     );
@@ -2494,13 +2494,17 @@ Return ONLY valid JSON matching this schema:
       chunkText,
       deckId,
       targetFlashcards - flashcards.length,
-      targetQuiz - quiz.length
+      Math.max(0, targetQuiz - quiz.length)
     );
     flashcards = [...flashcards, ...offlineBackup.flashcards];
-    quiz = ensureOptionUniquenessAcrossQuiz([...quiz, ...offlineBackup.quiz]);
+    quiz = ensureOptionUniquenessAcrossQuiz(deduplicateQuizQuestions([...quiz, ...offlineBackup.quiz]));
   }
 
-  return validateDeckQuality({ flashcards, quiz, quotaNotice: usedQuotaFallback });
+  return validateDeckQuality({
+    flashcards,
+    quiz: quiz.slice(0, targetQuiz),
+    quotaNotice: usedQuotaFallback,
+  });
 }
 
 export async function generateStudyMaterial(
@@ -2510,9 +2514,10 @@ export async function generateStudyMaterial(
   const cleaned = cleanDocumentText(text);
   const cleanLength = cleaned.length;
 
-  // DYNAMIC CARD COUNT SCALING based on document content length (~1 card per 280 chars)
+  // DYNAMIC COUNT SCALING: a short deck should still have a meaningful quiz,
+  // while larger sources receive enough questions to cover multiple concepts.
   const totalTargetFlashcards = Math.max(12, Math.min(60, Math.round(cleanLength / 280)));
-  const totalTargetQuiz = Math.max(5, Math.min(25, Math.round(totalTargetFlashcards / 2.5)));
+  const totalTargetQuiz = Math.max(10, Math.min(30, Math.round(totalTargetFlashcards / 2)));
 
   const chunks = splitTextIntoChunks(cleaned);
   console.log(
@@ -2630,61 +2635,57 @@ function generateOfflineStudyMaterial(
   const today = getTodayDateString();
   const cleaned = cleanDocumentText(text);
 
-  // Extract complete explanatory sentences (> 35 chars, ending in punctuation, not headings or keyword dumps)
+  // This is an extractive fallback, not a pretend AI generator. It only asks about
+  // complete source statements, which is less polished than the model but avoids
+  // fabricated claims and generic "What does this mechanism do?" questions.
   const sentences = cleaned
     .split(/(?<=[.!?])\s+/)
     .map((s) => s.trim())
     .filter(
       (s) =>
-        s.length > 35 &&
+        s.length > 45 &&
         !isHeadingLine(s) &&
         !isKeywordListAnswer(s)
     );
 
-  const topics = ['Core Concept', 'Definitions', 'Key Mechanisms', 'Applications', 'Summary Points'];
-
   const validSentences =
     sentences.length > 0
       ? sentences
-      : ['Artificial intelligence systems synthesize model data to perform cognitive tasks.'];
+      : ['The supplied material did not contain enough complete explanatory statements to create a reliable study item.'];
 
-  // Array of varied, natural question templates
-  const questionTemplates = [
-    (kw: string) => `What primary role does ${kw} perform?`,
-    (kw: string) => `How does ${kw} function within this framework?`,
-    (kw: string) => `What key advantage does ${kw} provide?`,
-    (kw: string) => `Why is ${kw} considered essential in this domain?`,
-    (kw: string) => `How is ${kw} applied to solve technical challenges?`,
-    (kw: string) => `What distinguishes ${kw} from alternative approaches?`,
-    (kw: string) => `What main objective does ${kw} accomplish?`,
-    (kw: string) => `In what context is ${kw} most effectively utilized?`,
-  ];
+  const subjectFor = (sentence: string) => {
+    const match = sentence.match(/^(.{3,90}?)\s+(?:is|are|was|were|means|refers to|describes|explains|causes|caused|allows|enables|requires|uses|use|includes|involves|occurs|happens|can|will|may|should)\b/i);
+    const subject = (match?.[1] || sentence.split(/[,:;]/)[0]).replace(/^["'“”‘’\-–—\s]+|["'“”‘’\-–—\s]+$/g, '').trim();
+    return subject.length >= 3 && subject.length <= 90 ? subject : 'the source concept';
+  };
 
-  const flashcardCount = Math.min(targetFlashcards, Math.max(12, validSentences.length));
+  const shuffle = <T,>(items: T[]): T[] => {
+    const result = [...items];
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+  };
+
+  const flashcardCount = Math.min(targetFlashcards, validSentences.length);
   const flashcards: Flashcard[] = [];
 
   for (let i = 0; i < flashcardCount; i++) {
-    const sentence = validSentences[i % validSentences.length];
-    const words = sentence.split(' ');
-
-    // Extract clean keyword without section numbers or punctuation
-    const rawKeyword = words.length > 4 ? words.slice(0, 3).join(' ') : 'this mechanism';
-    const keyword = rawKeyword.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'this concept';
-
-    const templateFn = questionTemplates[i % questionTemplates.length];
-    const rawQ = templateFn(keyword);
+    const sentence = validSentences[i];
+    const subject = subjectFor(sentence);
 
     flashcards.push({
       id: uuidv4(),
       deckId,
-      question: cleanQuestionText(rawQ),
-      answer: formatConciseSentence(sentence, 22),
+      question: `How would you explain ${subject}?`,
+      answer: formatConciseSentence(sentence, 38),
       difficulty: null,
       intervalDays: 0,
       nextReviewDate: today,
       timesReviewed: 0,
       timesIncorrect: 0,
-      topic: topics[i % topics.length],
+      topic: subject,
       isBookmarked: false,
       masteryLevel: 'new',
       correctReviewCount: 0,
@@ -2693,44 +2694,30 @@ function generateOfflineStudyMaterial(
     });
   }
 
-  const quizCount = Math.max(targetQuiz, Math.min(25, Math.floor(validSentences.length / 2)));
+  // Each usable source statement can form one question. Its three distractors
+  // are drawn from other statements in the same source, so we can cover more
+  // concepts without inventing facts.
+  const quizCount = validSentences.length >= 4 ? Math.min(targetQuiz, Math.floor(validSentences.length / 4)) : 0;
   const rawQuiz: QuizQuestion[] = [];
 
   for (let i = 0; i < quizCount; i++) {
-    // Pick target sentence at index (i * 3) % length
-    const targetIdx = (i * 3) % validSentences.length;
+    const targetIdx = i * 4;
     const targetSentence = validSentences[targetIdx];
-    const words = targetSentence.split(' ');
-    const rawKeyword = words.slice(0, 3).join(' ');
-    const keyword = rawKeyword.replace(/[^a-zA-Z0-9\s]/g, '').trim() || 'this feature';
-
-    const correctAnswer = formatShortOption(targetSentence, 8);
-
-    // Pick 3 non-overlapping distractors starting from (i * 3 + 1)
-    const distractors: string[] = [];
-    for (let d = 1; d <= 5; d++) {
-      const candidateIdx = (targetIdx + d) % validSentences.length;
-      if (candidateIdx !== targetIdx) {
-        const candidateOpt = formatShortOption(validSentences[candidateIdx], 8);
-        if (!distractors.includes(candidateOpt) && candidateOpt !== correctAnswer) {
-          distractors.push(candidateOpt);
-        }
-      }
-      if (distractors.length >= 3) break;
-    }
-
-    if (distractors.length < 3) continue;
-
-    const options = [correctAnswer, ...distractors].sort(() => Math.random() - 0.5);
-    const templateFn = questionTemplates[(i + 3) % questionTemplates.length];
+    const correctAnswer = formatShortOption(targetSentence, 10);
+    const distractors = validSentences
+      .slice(targetIdx + 1, targetIdx + 4)
+      .map((sentence) => formatShortOption(sentence, 10));
+    if (distractors.length !== 3 || new Set([correctAnswer, ...distractors]).size !== 4) continue;
+    const subject = subjectFor(targetSentence);
+    const options = shuffle([correctAnswer, ...distractors]);
 
     rawQuiz.push({
       id: uuidv4(),
-      question: cleanQuestionText(templateFn(keyword)),
+      question: `Which statement about ${subject} is supported by the source?`,
       options,
       correctAnswer,
-      explanation: `Source text: "${formatConciseSentence(targetSentence, 20)}".`,
-      topic: topics[i % topics.length],
+      explanation: `The source states: ${formatConciseSentence(targetSentence, 28)}`,
+      topic: subject,
     });
   }
 

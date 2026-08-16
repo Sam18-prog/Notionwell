@@ -60,12 +60,6 @@ function setupActivityListeners() {
     }
   });
 
-  // Auto-start on website visit/load
-  setTimeout(() => {
-    if (!timerRunning && !isIdlePaused) {
-      startGlobalTimer();
-    }
-  }, 100);
 }
 
 function flushCurrentSegment() {
@@ -96,7 +90,6 @@ export function startGlobalTimer(): void {
         if (Date.now() - lastInteractionTime >= IDLE_TIMEOUT_MS) {
           isIdlePaused = true;
           pauseGlobalTimer();
-          flushCurrentSegment();
           return;
         }
 
@@ -116,15 +109,12 @@ export function pauseGlobalTimer(): void {
     intervalId = null;
   }
 
-  if (timerSeconds > 0) {
-    flushCurrentSegment();
-  }
-
   notifyTimerUpdate();
 }
 
 export function resetAndSaveGlobalTimer(): void {
   pauseGlobalTimer();
+  flushCurrentSegment();
   notifyTimerUpdate();
 }
 
