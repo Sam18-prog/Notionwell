@@ -76,3 +76,5 @@ export {
   hasDuplicateOrOverlappingOptions,
   ensureOptionUniquenessAcrossQuiz,
 } from './app';
+
+export type { GeneratedStudyMaterial } from './app';

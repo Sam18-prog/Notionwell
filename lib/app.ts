@@ -1684,7 +1684,7 @@ export interface GeneratedStudyMaterial {
   quiz: QuizQuestion[];
   skippedChunks?: number;
   totalChunks?: number;
-  quotaNotice?: boolean | string;
+  quotaNotice?: boolean;
 }
 
 function getAIClientAndModel(): { client: OpenAI; model: string } | null {
