@@ -1317,7 +1317,7 @@ export function getDashboardMetrics(subjectId?: string): DashboardMetrics {
         }
         topicDetailsMap[normalized].totalCards += 1;
         topicDetailsMap[normalized].incorrectCount += card.timesIncorrect || 0;
-        topicDetailsMap[normalized].correctCount += card.timesCorrect || 0;
+        topicDetailsMap[normalized].correctCount += card.correctReviewCount || 0;
       }
     });
   });
@@ -2451,7 +2451,7 @@ Return ONLY valid JSON matching this schema:
           console.log(`[Quiz Reject]: Intra-question option duplication. Question: "${q}"`);
           return false;
         }
-        if (isTemplatePlaceholderText(q) || options.some((opt) => isTemplatePlaceholderText(opt))) {
+        if (isTemplatePlaceholderText(q) || options.some((opt: string) => isTemplatePlaceholderText(opt))) {
           console.log(`[Quiz Reject]: Contains template placeholder text. Question: "${q}"`);
           return false;
         }

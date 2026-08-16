@@ -48,8 +48,9 @@ export {
 
   // Achievement Badges Storage
   getBadges,
-  unlockBadge,
-  evaluateBadges,
+  saveBadges,
+  checkAndUnlockBadges,
+  unlockQuizWhizBadge,
 
   // Account & Session Auth Storage
   getStoredAccount,
