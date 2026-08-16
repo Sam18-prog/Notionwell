@@ -1312,7 +1312,7 @@ export function getDashboardMetrics(subjectId?: string): DashboardMetrics {
             correctCount: 0,
             totalCards: 0,
             deckId: deck.id,
-            deckTitle: deck.title,
+            deckTitle: deck.name,
           };
         }
         topicDetailsMap[normalized].totalCards += 1;
