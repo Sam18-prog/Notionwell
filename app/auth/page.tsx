@@ -89,9 +89,11 @@ function AuthForm() {
     <div className="min-h-[80vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8 bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-3xl p-8 shadow-xs relative overflow-hidden">
         <div className="text-center relative z-10">
-          <div className="w-14 h-14 rounded-2xl bg-[#2563EB] dark:bg-[#3B82F6] text-white flex items-center justify-center mx-auto shadow-xs mb-4">
-            <GraduationCap className="w-8 h-8 text-white" />
-          </div>
+          <img
+            src="/logo.png"
+            alt="Notionwell"
+            className="w-16 h-16 rounded-2xl mx-auto shadow-md mb-4 object-contain"
+          />
           <h2 className="text-2xl sm:text-3xl font-extrabold text-[#0F172A] dark:text-[#F8FAFC] tracking-tight">
             {tab === 'login' ? 'Student Sign In' : 'Create Student Account'}
           </h2>

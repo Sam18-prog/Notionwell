@@ -121,9 +121,11 @@ export default function Sidebar() {
       {/* MOBILE TOP BAR (Narrow Viewports) */}
       <div className="lg:hidden bg-white dark:bg-[#0F172A] border-b border-[#E2E8F0] dark:border-[#263449] px-4 py-3 flex items-center justify-between sticky top-0 z-40">
         <Link href="/" className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-[#2563EB] dark:bg-[#3B82F6] text-white flex items-center justify-center">
-            <GraduationCap className="w-5 h-5 text-white" />
-          </div>
+          <img
+            src="/logo.png"
+            alt="Notionwell"
+            className="w-8 h-8 rounded-lg object-contain shadow-xs"
+          />
           <span className="font-extrabold text-base text-[#0F172A] dark:text-[#F8FAFC]">
             Notionwell
           </span>
@@ -161,9 +163,11 @@ export default function Sidebar() {
           {/* BRAND LOGO */}
           <div className="flex items-center justify-between">
             <Link href="/" className="flex items-center gap-3 overflow-hidden group">
-              <div className="w-10 h-10 rounded-xl bg-[#2563EB] dark:bg-[#3B82F6] text-white flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform">
-                <GraduationCap className="w-6 h-6 text-white" />
-              </div>
+              <img
+                src="/logo.png"
+                alt="Notionwell"
+                className="w-10 h-10 rounded-xl object-contain shrink-0 shadow-xs group-hover:scale-105 transition-transform"
+              />
 
               {!isCollapsed && (
                 <div className="flex flex-col whitespace-nowrap overflow-hidden transition-all duration-300">

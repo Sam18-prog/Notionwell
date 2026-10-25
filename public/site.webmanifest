@@ -1,0 +1,20 @@
+{
+  "name": "Notionwell — Intelligent Study Space",
+  "short_name": "Notionwell",
+  "description": "AI-powered flashcard and quiz generator with SM-2 spaced repetition for effective learning.",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#2563EB",
+  "background_color": "#F6F8FC",
+  "display": "standalone"
+}

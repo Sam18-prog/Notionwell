@@ -53,9 +53,11 @@ export default function Navbar() {
     <header className="sticky top-0 z-50 bg-white/95 dark:bg-[#0F172A]/95 backdrop-blur-md border-b border-[#E2E8F0] dark:border-[#263449] shadow-xs transition-colors duration-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="w-9 h-9 rounded-xl bg-[#2563EB] dark:bg-[#3B82F6] text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform duration-200">
-            <GraduationCap className="w-5 h-5 text-white" />
-          </div>
+          <img
+            src="/logo.png"
+            alt="Notionwell"
+            className="w-9 h-9 rounded-xl shadow-xs group-hover:scale-105 transition-transform duration-200 object-contain"
+          />
           <div className="flex flex-col">
             <span className="font-extrabold text-base leading-none text-[#0F172A] dark:text-[#F8FAFC]">
               Notionwell
