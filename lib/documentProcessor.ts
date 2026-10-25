@@ -1,3 +1,11 @@
+if (typeof window === 'undefined') {
+  try {
+    const nodeReq = eval('require');
+    nodeReq('dns')?.setDefaultResultOrder?.('ipv4first');
+  } catch {}
+}
+
+import zlib from 'zlib';
 import { extractTextWithVisionOcr } from './app';
 
 // ============================================================================
@@ -78,6 +86,28 @@ export function evaluateTextQuality(text: string, pageCount = 1): TextQualityRes
     };
   }
 
+  // Explicit check for PDF internal metadata, C2PA content credentials, SSL root certs, UUIDs
+  const lower = trimmed.toLowerCase();
+  const isMetadataStream =
+    lower.includes('c2pa') ||
+    lower.includes('content credentials') ||
+    lower.includes('root ca') ||
+    lower.includes('ssl.com') ||
+    lower.includes('intermediate certificate authority') ||
+    lower.includes('adobe:ns') ||
+    lower.includes('xmpmeta') ||
+    lower.includes('/flatedecode') ||
+    lower.includes('/xref') ||
+    lower.includes('uuid:');
+
+  if (isMetadataStream) {
+    return {
+      isHighQuality: false,
+      score: 0.1,
+      reason: 'Contains internal PDF structural metadata or C2PA/SSL certificate streams instead of readable text',
+    };
+  }
+
   return { isHighQuality: true, score: 0.95, reason: 'High quality text extraction' };
 }
 
@@ -99,61 +129,55 @@ export async function pass1VisualTranscription(
   }
 
   const base64Data = buffer.toString('base64');
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 50000);
+  const prompt = `You are an expert multimodal document reader and OCR transcription specialist.
+Transcribe and extract ALL readable text, headings, bullet points, numbered lists, definitions, tables, and study notes from this document with high fidelity.
+Output ONLY the clean transcribed study text. Do not invent metadata or summaries.`;
 
-  const prompt = `You are an expert multimodal document reader and OCR vision specialist.
-Carefully examine this document/image visually. Perform a complete, highly accurate visual transcription of ALL content.
+  const visionModels = [
+    process.env.AI_MODEL || 'gemini-3.5-flash',
+    'gemini-flash-lite-latest',
+    'gemini-flash-latest'
+  ];
 
-INSTRUCTIONS:
-1. READ HANDWRITING: Read handwritten study notes, marginalia, annotations, arrows, and emphasis.
-2. PRESERVE STRUCTURE: Keep original headings (#, ##), bullet points, numbered lists, and layout hierarchy.
-3. MATHEMATICAL EQUATIONS: Format all mathematical formulas and equations into clean LaTeX ($...$ for inline, $$...$$ for block equations). Recognize powers, roots, fractions, integrals, matrices, summations, and Greek symbols.
-4. PROGRAMMING CODE: Preserve code snippets (Python, C, C++, Java, JS, HTML, CSS, SQL, 8085 Assembly). Keep exact brackets, indentation, syntax, and variable names.
-5. DIAGRAMS & SCHEMATICS: If a diagram, flowchart, block diagram, or circuit is present, describe it clearly inside a block tagged [DIAGRAM] ... [/DIAGRAM], detailing components, labels, and relationships.
-6. TABLES: Convert handwritten or printed tables into clean Markdown tables (| Header 1 | Header 2 |).
-7. UNCLEAR SECTIONS: Do NOT hallucinate or guess text. If a section or word is genuinely unreadable or smudged, mark it explicitly as [UNCLEAR].
+  for (const model of visionModels) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-Output ONLY the structured transcription text.`;
-
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: prompt },
-                {
-                  inlineData: {
-                    mimeType: mimeType === 'pdf' || mimeType.endsWith('/pdf') ? 'application/pdf' : mimeType,
-                    data: base64Data,
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  {
+                    inline_data: {
+                      mime_type: mimeType === 'pdf' || mimeType.endsWith('/pdf') ? 'application/pdf' : mimeType,
+                      data: base64Data,
+                    },
                   },
-                },
-              ],
-            },
-          ],
-        }),
-      }
-    );
-    clearTimeout(timeoutId);
+                ],
+              },
+            ],
+          }),
+        }
+      );
+      clearTimeout(timeoutId);
 
-    if (response.ok) {
-      const json = await response.json();
-      const text = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-      if (text.length >= 20) {
-        return text;
+      if (response.ok) {
+        const json = await response.json();
+        const text = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+        if (text.length >= 20) {
+          return text;
+        }
       }
-    }
-  } catch (err: any) {
-    if (err?.name === 'AbortError') {
-      console.warn('[Pass 1 Vision]: Timed out after 50s');
-    } else {
-      console.warn('[Pass 1 Vision Error]:', err);
+    } catch (err: any) {
+      // Continue to fallback vision model
     }
   }
 
@@ -172,7 +196,7 @@ export async function pass2ContextualVerification(rawTranscription: string): Pro
 
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${process.env.AI_MODEL || 'gemini-3.5-flash'}:generateContent?key=${geminiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -214,6 +238,88 @@ Transcription to verify:
 // ============================================================================
 // 3. MAIN MULTIMODAL DOCUMENT PROCESSING ENGINE
 // ============================================================================
+
+/**
+ * Direct /FlateDecode Stream Decompressor fallback for PDFs that fail in standard parsers
+ * (e.g. bad XRef table, corrupted object streams, or C2PA metadata blocks).
+ */
+export function extractRawPdfStreamFallback(buffer: Buffer): string {
+  const textParts: string[] = [];
+  const binary = buffer.toString('latin1');
+  const fullRaw = buffer.toString('utf-8') + '\n' + binary;
+
+  const isPdfMetadataArtifact = (s: string) => {
+    const l = s.toLowerCase();
+    return (
+      l.includes('c2pa') ||
+      l.includes('content credentials') ||
+      l.includes('root ca') ||
+      l.includes('ssl.com') ||
+      l.includes('intermediate certificate') ||
+      l.includes('xmpmeta') ||
+      l.includes('adobe:ns') ||
+      l.includes('uuid:') ||
+      /\bd:\d{14}\b/i.test(s)
+    );
+  };
+
+  const parenMatches = fullRaw.match(/\(([^()]{2,500})\)/g) || [];
+  for (const m of parenMatches) {
+    const raw = m.slice(1, -1).replace(/\\([()\\])/g, '$1');
+    if (
+      /[a-zA-Z0-9]{2,}/.test(raw) &&
+      !isPdfMetadataArtifact(raw) &&
+      !/^(Font|Catalog|Page|Parent|ProcSet|Encoding|FontDescriptor|Metadata|Type|Filter|FlateDecode|FontName|Subtype|Widths|FontMatrix|FontBBox|Stream|XObject|Root|Info|Size)/i.test(raw)
+    ) {
+      textParts.push(raw);
+    }
+  }
+
+  const streamRegex = /stream[\r\n]+([\s\S]*?)[\r\n]+endstream/gi;
+  let match: RegExpExecArray | null;
+  while ((match = streamRegex.exec(binary)) !== null) {
+    try {
+      const streamData = Buffer.from(match[1], 'latin1');
+      let decompressed = '';
+      try {
+        decompressed = zlib.inflateSync(streamData).toString('utf-8');
+      } catch {
+        try {
+          decompressed = zlib.unzipSync(streamData).toString('utf-8');
+        } catch {
+          decompressed = '';
+        }
+      }
+
+      if (decompressed) {
+        const streamParens = decompressed.match(/\(([^()]{2,500})\)/g) || [];
+        for (const m of streamParens) {
+          const raw = m.slice(1, -1).replace(/\\([()\\])/g, '$1');
+          if (
+            /[a-zA-Z0-9]{2,}/.test(raw) &&
+            !isPdfMetadataArtifact(raw) &&
+            !/^(Font|Catalog|Page|Parent|ProcSet|Encoding|FontDescriptor|Metadata|Type|Filter|FlateDecode|FontName|Subtype|Widths|FontMatrix|FontBBox|Stream|XObject|Root|Info|Size)/i.test(raw)
+          ) {
+            textParts.push(raw);
+          }
+        }
+        const streamTjs = decompressed.match(/\[\s*(\([^)]+\)\s*[-0-9\s]*)+\s*\]\s*TJ/gi) || [];
+        for (const tj of streamTjs) {
+          const parts = tj.match(/\(([^)]+)\)/g) || [];
+          const joined = parts.map((p) => p.slice(1, -1)).join('');
+          if (joined.length > 2 && !isPdfMetadataArtifact(joined)) {
+            textParts.push(joined);
+          }
+        }
+      }
+    } catch {
+      // Ignore corrupted stream
+    }
+  }
+
+  return Array.from(new Set(textParts)).join(' ').replace(/\s+/g, ' ').trim();
+}
+
 export async function processDocumentMultimodal(
   buffer: Buffer,
   fileType: string,
@@ -232,8 +338,12 @@ export async function processDocumentMultimodal(
       const parsed = await pdfParse(buffer);
       nativeText = parsed.text || '';
     } catch (e) {
-      console.warn('[Multimodal Processor]: pdf-parse failed, will use Vision:', e);
-      nativeText = '';
+      console.warn('[Multimodal Processor]: pdf-parse failed, attempting stream recovery fallback:', e);
+      try {
+        nativeText = extractRawPdfStreamFallback(buffer);
+      } catch (streamErr) {
+        nativeText = '';
+      }
     }
   } else if (lowerName.endsWith('.docx')) {
     sourceType = 'docx';

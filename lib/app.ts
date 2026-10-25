@@ -1,5 +1,27 @@
+if (typeof window === 'undefined') {
+  try {
+    const nodeReq = eval('require');
+    nodeReq('dns')?.setDefaultResultOrder?.('ipv4first');
+  } catch {}
+}
+
 import OpenAI from 'openai';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  generateGroundedStudyMaterial,
+  calculateTargetItemCounts,
+  verifyQuoteGrounding,
+  verifyFlashcard,
+  verifyQuizQuestion,
+} from './studyEngine';
+
+export {
+  generateGroundedStudyMaterial,
+  calculateTargetItemCounts,
+  verifyQuoteGrounding,
+  verifyFlashcard,
+  verifyQuizQuestion,
+};
 
 // ============================================================================
 // DATA MODELS
@@ -1694,7 +1716,7 @@ export interface GeneratedStudyMaterial {
   quotaNotice?: boolean;
 }
 
-function getAIClientAndModel(): { client: OpenAI; model: string } | null {
+export function getAIClientAndModel(): { client: OpenAI; model: string } | null {
   const geminiKey = process.env.GEMINI_API_KEY;
   const groqKey = process.env.GROQ_API_KEY;
   const openRouterKey = process.env.OPENROUTER_API_KEY;
@@ -1707,7 +1729,7 @@ function getAIClientAndModel(): { client: OpenAI; model: string } | null {
         apiKey: geminiKey,
         baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
       }),
-      model: process.env.AI_MODEL || 'gemini-1.5-flash',
+      model: process.env.AI_MODEL || 'gemini-3.5-flash',
     };
   }
 
@@ -1768,7 +1790,7 @@ export async function extractTextWithVisionOcr(
       const timeoutId = setTimeout(() => controller.abort(), 45000);
 
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${process.env.AI_MODEL || 'gemini-3.5-flash'}:generateContent?key=${geminiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1781,8 +1803,8 @@ export async function extractTextWithVisionOcr(
                     text: 'You are an expert document OCR reader. Transcribe and extract ALL handwritten text, diagrams, notes, formulas, equations, definitions, memory instructions (such as LDA, LDAX, SRAM, DRAM, addressing modes), and written content from this document with high fidelity. Output ONLY the raw extracted text. Do not include metadata, introductory phrases, or placeholder summaries.',
                   },
                   {
-                    inlineData: {
-                      mimeType: mimeType === 'pdf' || mimeType.endsWith('/pdf') ? 'application/pdf' : mimeType,
+                    inline_data: {
+                      mime_type: mimeType === 'pdf' || mimeType.endsWith('/pdf') ? 'application/pdf' : mimeType,
                       data: base64Data,
                     },
                   },
@@ -1848,40 +1870,63 @@ export async function extractTextWithVisionOcr(
 
 /**
  * Pre-processes and cleans extracted document text before chunking or AI generation.
- * Strips Table of Contents blocks, page headers/footers, and standalone callout numbers.
+ * Strips Table of Contents blocks, page headers/footers, standalone page numbers,
+ * leading serial/question number prefixes, broken PDF line wraps, syllabus codes,
+ * university metadata, and date-only lines.
  */
 export function cleanDocumentText(text: string): string {
   if (!text) return '';
 
   let lines = text.split(/\r?\n/);
 
-  // 1. Remove repeating page headers / footers
+  // ── PHASE 1: Line-level filters ───────────────────────────────────────────
+
+  // 1a. Remove repeating page headers / footers, TOC dot leaders, and bare page numbers
   lines = lines.filter((line) => {
     const trimmed = line.trim();
     if (!trimmed) return true; // keep empty lines for paragraph boundaries
 
     // Strip "Page X of Y", "Page X", "X of Y"
-    if (/^(page\s+\d+(\s+of\s+\d+)?|\d+\s+of\s+\d+)$/i.test(trimmed)) {
-      return false;
-    }
-    // Strip header lines like "Artificial Intelligence & Its Applications Page 3 of 11"
-    if (/.*\|?\s*page\s+\d+(\s+of\s+\d+)?$/i.test(trimmed)) {
-      return false;
-    }
-    // Strip Table of Contents dot leaders e.g. "3.1 Machine Learning (ML) .................. 7"
-    if (/(\.\.\.\.\.|\.\s\.\s\.\s\.)\s*\d+$/.test(trimmed)) {
-      return false;
-    }
-    // Strip standalone callout numbers / page markers e.g. lone "Page 4" or "$15.7 Trillion" callouts without sentences
-    if (/^[\$€£]?\d+(\.\d+)?\s*(trillion|billion|million|[tbm])?$/i.test(trimmed)) {
+    if (/^(page\s+\d+(\s+of\s+\d+)?|\d+\s+of\s+\d+)$/i.test(trimmed)) return false;
+
+    // Strip header lines like "Artificial Intelligence Page 3 of 11"
+    if (/.*\|?\s*page\s+\d+(\s+of\s+\d+)?$/i.test(trimmed)) return false;
+
+    // Strip Table of Contents dot leaders e.g. "3.1 Machine Learning .......... 7"
+    if (/(\.{4,}|\.\s\.\s\.\s\.)[\s\d]*\d+$/.test(trimmed)) return false;
+
+    // Strip lines that are ONLY a standalone number or dash-wrapped page marker
+    // e.g. "4", "  12  ", "- 4 -", "-- 12 --"
+    if (/^[-\u2013\u2014\s]*\d{1,4}[-\u2013\u2014\s]*$/.test(trimmed)) return false;
+
+    // Strip standalone callout numbers / financial callouts without sentence context
+    if (/^[$\u20ac\xa3]?\d+(\.\d+)?\s*(trillion|billion|million|[tbm])?$/i.test(trimmed)) return false;
+
+    // Syllabus/course codes: e.g. "BTCS501", "CS-301", "3CS4"
+    if (/^[A-Z]{2,6}[\-\s]?\d{3,6}\s*$/.test(trimmed)) return false;
+
+    // Unit/module/chapter headers with only a number (no body text)
+    if (/^(unit|module|chapter|section|topic)\s*[\d\-:\.]+\s*$/i.test(trimmed)) return false;
+
+    // Date-only lines: "October 2024", "Semester V", "Year: 2023", "2023-24"
+    if (/^(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}$/i.test(trimmed)) return false;
+    if (/^(semester|sem|year|batch|session)\s*[:\-]?\s*[\dIVXivx\/\-]+$/i.test(trimmed)) return false;
+
+    // University / institution ALL-CAPS header lines (no lowercase letters, no sentence punctuation)
+    if (
+      trimmed.length < 80 &&
+      !/[a-z]/.test(trimmed) &&
+      !/[.!?]$/.test(trimmed) &&
+      trimmed.split(/\s+/).length > 2
+    ) {
       return false;
     }
 
     return true;
   });
 
-  // 2. Remove Table of Contents blocks (repeated lists of section titles without body paragraphs)
-  const cleanedLines: string[] = [];
+  // 1b. Remove Table of Contents blocks
+  const afterTocFilter: string[] = [];
   let insideToc = false;
 
   for (let i = 0; i < lines.length; i++) {
@@ -1895,11 +1940,10 @@ export function cleanDocumentText(text: string): string {
     }
 
     if (insideToc) {
-      // If we encounter a line with dots and a page number, or a bare section line in TOC block, skip it
       if (/(\.{2,}|\s{4,})\s*\d+$/.test(trimmed) || /^\d+(\.\d+)*\s+[A-Z]/.test(trimmed)) {
         continue;
       }
-      // TOC ends when we encounter a real explanatory paragraph (> 100 characters ending in punctuation)
+      // TOC ends when we encounter a real explanatory paragraph (> 100 chars ending in punctuation)
       if (trimmed.length > 100 && /[.!?]$/.test(trimmed)) {
         insideToc = false;
       } else {
@@ -1907,10 +1951,84 @@ export function cleanDocumentText(text: string): string {
       }
     }
 
-    cleanedLines.push(line);
+    afterTocFilter.push(line);
   }
 
-  return cleanedLines.join('\n').trim();
+  lines = afterTocFilter;
+
+  // ── PHASE 2: Strip leading serial / question-number prefixes from lines ───
+  // Patterns: "Q1.", "Q.1", "Q 1.", "1.", "1)", "(1)", "(a)", "[i]", "Sr. No.", etc.
+  // Only the PREFIX is removed; the rest of the line content is preserved.
+  lines = lines.map((line) => {
+    const t = line.trim();
+    if (!t) return line;
+
+    // "Sr. No. X", "Sr No X", "S.No. X"
+    const srNo = t.replace(/^(Sr\.?\s*No\.?\s*\d*[\.\):\s]+)/i, '').trim();
+    if (srNo !== t) return srNo;
+
+    // "Q1.", "Q.1.", "Q 1.", "Q1)", "Q1:" — question prefixes
+    const qPrefix = t.replace(/^Q\.?\s*\d+[\.\):\s]+/i, '').trim();
+    if (qPrefix !== t) return qPrefix;
+
+    // "(a)", "(b)", "(i)", "(ii)", "(1)", "[a]", "[1]"
+    const bracketPrefix = t.replace(/^[\(\[]\s*[a-z0-9ivxlcdm]{1,4}\s*[\)\]][\s\.\):,]*/i, '').trim();
+    if (bracketPrefix !== t) return bracketPrefix;
+
+    // "1.", "12.", "1)", "12)" — plain numbered list prefixes (only when 2+ chars follow)
+    const numPrefix = t.replace(/^\d{1,3}[\.\)]\s+(?=\S)/, '').trim();
+    if (numPrefix !== t) return numPrefix;
+
+    return line;
+  });
+
+  // ── PHASE 3: Collapse broken PDF line wraps ───────────────────────────────
+  // A "broken" line is one that breaks mid-sentence (ends without punctuation and
+  // is followed by a lowercase continuation). Tables, markdown headings, and bullet
+  // items are strictly protected from collapsing.
+  const isBulletOrList = (s: string) => /^(\s*[-*•]|\s*\d+[\.\)]|\s*\||#+ )/.test(s);
+  const isHeading = (s: string) => isHeadingLine(s) || /^#{1,6}\s/.test(s);
+
+  const joined: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const current = lines[i];
+    const t = current.trim();
+    const nextLine = i + 1 < lines.length ? lines[i + 1].trim() : '';
+
+    const nextStartsWithLower = /^[a-z]/.test(nextLine);
+    const isMidSentenceWrap =
+      t.length > 0 &&
+      !/[.!?:;]$/.test(t) &&
+      nextLine.length > 0 &&
+      !isBulletOrList(t) &&
+      !isBulletOrList(nextLine) &&
+      !isHeading(t) &&
+      !isHeading(nextLine) &&
+      (nextStartsWithLower || (t.length < 85 && !/^[A-Z\d]/.test(nextLine)));
+
+    if (isMidSentenceWrap) {
+      joined.push(t + ' ' + nextLine);
+      i++; // skip the now-merged next line
+    } else {
+      joined.push(current);
+    }
+  }
+  lines = joined;
+
+  // ── PHASE 4: Collapse excessive blank lines to a single separator ─────────
+  const collapsed: string[] = [];
+  let consecutiveBlanks = 0;
+  for (const line of lines) {
+    if (line.trim() === '') {
+      consecutiveBlanks++;
+      if (consecutiveBlanks <= 1) collapsed.push(line);
+    } else {
+      consecutiveBlanks = 0;
+      collapsed.push(line);
+    }
+  }
+
+  return collapsed.join('\n').trim();
 }
 
 /**
@@ -1977,16 +2095,45 @@ export function splitTextIntoChunks(text: string, chunkSize = 9000): string[] {
 }
 
 /**
- * Cleans lazy or templated question phrasing, removing raw section numbers,
+ * Checks if text begins with a serial number, question prefix, or bullet artifact.
+ * e.g. "Q1.", "Q.1", "Q 1.", "1.", "1)", "(a)", "[i]", "Sr. No. 1"
+ */
+export function startsWithSerialPrefix(text: string): boolean {
+  if (!text) return false;
+  const t = text.trim();
+  // Question prefixes: "Q1.", "Q.1", "Q 1.", "Q1)", "Q1:"
+  if (/^Q\.?\s*\d+[\.\):\s]/i.test(t)) return true;
+  // Serial number prefixes: "Sr. No. X", "Sr No", "S.No."
+  if (/^(Sr\.?\s*No\.?|S\.No\.?|Serial\s+No\.?)\s*\d*[\.\):\s]/i.test(t)) return true;
+  // Numbered prefixes: "1.", "1)", "12.", "12)"
+  if (/^\d{1,3}[\.\)]\s/.test(t)) return true;
+  // Bracketed prefixes: "(a)", "(1)", "[i]", "[1]", "(A)"
+  if (/^[\(\[]\s*([a-z0-9]{1,3}|[ivxlcdm]{1,4})\s*[\)\]][\s\.\):]/i.test(t)) return true;
+  // Bare number dash/colon: "1 - ", "1: "
+  if (/^\d{1,3}\s*[-–—:]\s*/.test(t)) return true;
+  return false;
+}
+
+/**
+ * Cleans lazy or templated question phrasing, removing raw serial numbers, section numbers,
  * quoted headings, and trailing commas.
  */
 export function cleanQuestionText(q: string): string {
   let cleaned = (q || '').trim();
 
-  // Strip section numbers e.g. "4.3", "3.1.2", "Section 4"
-  cleaned = cleaned.replace(/\b(\d+(\.\d+)+|section\s+\d+|chapter\s+\d+)\b/gi, '').trim();
+  // Strip leading question/serial number prefixes if any slipped through
+  cleaned = cleaned.replace(/^Q\.?\s*\d+[\.\):\s]+/i, '');
+  cleaned = cleaned.replace(/^(Sr\.?\s*No\.?|S\.No\.?)\s*\d*[\.\):\s]+/i, '');
+  cleaned = cleaned.replace(/^\d{1,3}[\.\)]\s+/, '');
+  cleaned = cleaned.replace(/^[\(\[]\s*([a-z0-9]{1,3}|[ivxlcdm]{1,4})\s*[\)\]][\s\.\):,]*/i, '');
 
-  // Strip quoted section headers e.g. "findings on "4.3 Autonomous Systems,"?" -> "findings on Autonomous Systems?"
+  // Strip section & chapter references (e.g. "Section 4.3", "Section 4", "Chapter 2.1")
+  cleaned = cleaned.replace(/\b(section|chapter|unit|module)\s+\d+(\.\d+)*\b/gi, '').trim();
+
+  // Strip remaining standalone section numbers e.g. "4.3", "3.1.2"
+  cleaned = cleaned.replace(/\b\d+(\.\d+)+\b/gi, '').trim();
+
+  // Strip quoted section headers e.g. "findings on \"4.3 Autonomous Systems,\"?" -> "findings on Autonomous Systems?"
   cleaned = cleaned.replace(/"\s*([^"]+?),?\s*"/g, '$1');
 
   // Replace lazy templated wrappers e.g. "Which statement correctly reflects the findings on X?" -> "What key mechanism defines X?"
@@ -1994,8 +2141,9 @@ export function cleanQuestionText(q: string): string {
   cleaned = cleaned.replace(/which statement accurately describes\s+/i, 'What primary role does ');
   cleaned = cleaned.replace(/what key concept is explained regarding\s+/i, 'How does ');
 
-  // Clean trailing punctuation bugs like ",?" or " , ?"
-  cleaned = cleaned.replace(/,\s*\?/g, '?').replace(/\s{2,}/g, ' ');
+  // Clean trailing punctuation bugs like ",?" or " , ?" or dangling prepositions before '?'
+  cleaned = cleaned.replace(/\s+(in|on|at|of|regarding|about)\s*\?/gi, '?');
+  cleaned = cleaned.replace(/,\s*\?/g, '?').replace(/\s+\?/g, '?').replace(/\s{2,}/g, ' ').trim();
 
   // Ensure first character is capitalized
   if (cleaned.length > 0) {
@@ -2216,16 +2364,39 @@ export function isTemplatePlaceholderText(text: string): boolean {
 export function validateDeckQuality(material: GeneratedStudyMaterial): GeneratedStudyMaterial {
   const flashcards = (material.flashcards || []).filter((fc) => {
     if (!fc || !fc.question || !fc.answer) return false;
-    if (isTemplatePlaceholderText(fc.question)) return false;
-    if (isTemplatePlaceholderText(fc.answer)) return false;
+    const q = fc.question.trim();
+    const a = fc.answer.trim();
+    // Rule: filter out questions shorter than 15 characters
+    if (q.length < 15) return false;
+    // Rule: filter out answers that are too short (< 5 characters)
+    if (a.length < 5) return false;
+    // Rule: filter out questions starting with raw number/serial prefixes
+    if (startsWithSerialPrefix(q)) return false;
+    // Rule: filter out template placeholder text
+    if (isTemplatePlaceholderText(q) || isTemplatePlaceholderText(a)) return false;
+    // Rule: filter out raw section headings
+    if (/^(\d+(\.\d+)*|section|chapter)\s+[A-Z]/i.test(q) && !q.includes('?')) return false;
     return true;
   });
 
   const quiz = (material.quiz || []).filter((q) => {
     if (!q || !q.question || !Array.isArray(q.options) || q.options.length !== 4) return false;
-    if (isTemplatePlaceholderText(q.question)) return false;
-    if (isTemplatePlaceholderText(q.correctAnswer)) return false;
+    const qText = q.question.trim();
+    // Rule: filter out questions shorter than 15 characters
+    if (qText.length < 15) return false;
+    // Rule: filter out questions starting with raw number/serial prefixes
+    if (startsWithSerialPrefix(qText)) return false;
+    // Rule: filter out questions with duplicate/overlapping options
+    if (hasDuplicateOrOverlappingOptions(q.options)) return false;
+    // Rule: filter out template placeholder text
+    if (isTemplatePlaceholderText(qText) || isTemplatePlaceholderText(q.correctAnswer)) return false;
     if (q.options.some((opt) => isTemplatePlaceholderText(opt))) return false;
+    // Rule: ensure correctAnswer matches one of the options
+    const correctNorm = q.correctAnswer.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const hasValidAnswer = q.options.some(
+      (opt) => opt.trim().toLowerCase().replace(/[^a-z0-9]/g, '') === correctNorm
+    );
+    if (!hasValidAnswer) return false;
     return true;
   });
 
@@ -2291,34 +2462,64 @@ export async function generateSingleChunkMaterial(
   targetQuiz = 5
 ): Promise<GeneratedStudyMaterial> {
   const config = getAIClientAndModel();
-  // Ask for a small surplus: the quality pass can safely discard duplicates while
-  // still returning the requested number of unique questions.
   const generationQuizTarget = targetQuiz + Math.max(4, Math.ceil(targetQuiz * 0.5));
 
   if (!config) {
-    return validateDeckQuality(generateOfflineStudyMaterial(chunkText, deckId, targetFlashcards, targetQuiz));
+    throw new Error(
+      'No AI provider API key found (GEMINI_API_KEY, OPENAI_API_KEY, GROQ_API_KEY, or OPENROUTER_API_KEY). Please configure your API key to generate study materials.'
+    );
   }
 
   const { client, model } = config;
 
-  const systemPrompt = `You are an expert instructional designer creating study material from the supplied source only. First identify the distinct concepts, definitions, relationships, processes, causes, and applications in the source. Then synthesize exactly ${targetFlashcards} flashcards and ${generationQuizTarget} multiple-choice quiz questions.
+  const systemPrompt = `You are a senior instructional designer and subject-matter expert. Your task is to create high-quality, pedagogically rigorous study material from the supplied source text.
 
-CRITICAL GENERATION RULES:
-1. SOURCE GROUNDED: Every answer, explanation, and distractor must be supported or directly contradicted by the supplied source. Never add outside facts or invent examples.
-2. VARIED, SPECIFIC QUESTIONS: Test a mixture of definition, mechanism, comparison, cause/effect, and application where the source supports them. Each question must name the actual concept it tests; never use vague templates such as "this mechanism" or "the findings on".
-3. DIRECT FLASHCARD ANSWERS: Answer the exact question in 1-3 clear sentences. Explain the relationship or reason, not just a keyword list.
-4. HIGH-QUALITY MCQS: Write one unambiguous correct answer and three plausible distractors that are clearly false for this question but belong to the same domain. Keep every option self-contained, concise, and 2-10 words long. Do not shorten an option by cutting it mid-idea.
-5. NO REPEATED OPTIONS: Do not reuse any answer option, correct answer, or distractor anywhere else in this quiz set.
-6. EXPLANATIONS: State why the correct option is correct using the source, and briefly distinguish it from the distractors when helpful.
-7. DISTINCT CONCEPTS ONLY: Every item must cover a distinct learning objective. Do not generate questions from bare headings, table-of-contents entries, or headers/footers.
+STEP 1 — IDENTIFY CONCEPTS: Before writing any question, identify all distinct academic concepts, definitions, mechanisms, cause-and-effect relationships, processes, and applications in the source. These form your question bank.
 
-Return ONLY valid JSON matching this schema:
+STEP 2 — GENERATE MATERIAL: Using those identified concepts, synthesize exactly ${targetFlashcards} flashcards and ${generationQuizTarget} multiple-choice quiz questions.
+
+══════════════════════════════════════════════════════════
+MANDATORY QUALITY RULES — VIOLATING ANY RULE = REJECTION
+══════════════════════════════════════════════════════════
+
+RULE 1 — ZERO VERBATIM COPYING:
+Never copy-paste any sentence or phrase directly from the source text. Always synthesize, rephrase, and reframe into an original question that tests understanding, application, or cause-and-effect. If a concept is "X causes Y", your question must ask about the relationship or consequence, never quote the raw sentence.
+
+RULE 2 — IGNORE DOCUMENT FORMATTING COMPLETELY:
+Completely ignore all serial numbers, syllabus codes (e.g. BTCS501, Unit 3), question numbers (Q1., 1., (a)), page numbers, chapter headings, table of contents entries, author names, institution names, and dates. NEVER ask meta-questions about the document itself such as "What is mentioned in point 4?" or "According to section 2.3...". Every question must be self-contained and conceptually meaningful.
+
+RULE 3 — SELF-CONTAINED QUESTIONS:
+Every question and flashcard must make complete sense on its own. A reader who has never seen the original document must be able to understand and answer the question based solely on its text and options.
+
+RULE 4 — HIGH-QUALITY MCQ DISTRACTORS:
+Provide exactly 4 distinct options of similar length and tone. The 3 wrong options (distractors) must be:
+  - Realistic conceptual misconceptions a student might actually hold
+  - In the same domain as the correct answer
+  - NOT obvious throwaway answers or random fragments from the text
+  - NOT shorter than 2 words or longer than 15 words
+  - All four options must be mutually exclusive (no overlap in meaning)
+
+RULE 5 — CHAIN-OF-THOUGHT CONCEPT FIELD REQUIRED:
+For every flashcard and quiz item, include a "concept_tested" field FIRST that names the specific academic concept being tested (e.g., "Dijkstra's Algorithm", "Osmotic Pressure", "Deadlock Prevention"). The model MUST identify the core concept before composing the question.
+
+RULE 6 — NO REPEATED OPTIONS:
+Do not reuse any answer option, correct answer, or distractor wording anywhere else in this quiz set.
+
+RULE 7 — CLEAR EXPLANATIONS:
+State clearly WHY the correct option is right based on academic principles. Briefly distinguish from the distractors when helpful. Limit to 1-2 concise sentences.
+
+RULE 8 — DISTINCT LEARNING OBJECTIVES:
+Every item must test a distinct concept. Do not generate two questions about the same idea. Never generate questions from bare headings, page numbers, or formatting artifacts.
+
+══════════════════════════════════════════════════════════
+RETURN ONLY VALID JSON — NO MARKDOWN, NO EXPLANATION TEXT
+══════════════════════════════════════════════════════════
 {
   "flashcards": [
-    { "question": string, "answer": string, "topic": string }
+    { "concept_tested": string, "question": string, "answer": string, "topic": string }
   ],
   "quiz": [
-    { "question": string, "options": [string, string, string, string], "correctAnswer": string, "explanation": string, "topic": string }
+    { "concept_tested": string, "question": string, "options": [string, string, string, string], "correctAnswer": string, "explanation": string, "topic": string }
   ]
 }`;
 
@@ -2348,7 +2549,7 @@ Return ONLY valid JSON matching this schema:
       }
     } catch (err: any) {
       if (isQuotaExceededError(err)) {
-        console.warn('[Gemini Quota Notice]: Demo API rate limit / quota reached. Switching seamlessly to Smart Offline AI Generator...');
+        console.warn('[AI Quota Notice]: Demo API rate limit / quota reached.');
         usedQuotaFallback = true;
         break;
       }
@@ -2366,10 +2567,11 @@ Return ONLY valid JSON matching this schema:
         const q = cleanQuestionText(item.question || '');
         const a = (item.answer || '').trim();
         if (!q || !a) return false;
+        if (q.length < 15) return false; // Enforce minimum length 15
+        if (startsWithSerialPrefix(q) || startsWithSerialPrefix(item.question || '')) return false; // Strip raw serial prefix
         if (isKeywordListAnswer(a)) return false;
         if (isTemplatePlaceholderText(q) || isTemplatePlaceholderText(a)) return false;
         if (/^(\d+(\.\d+)*|section|chapter)\s+[A-Z]/i.test(q) && !q.includes('?')) return false;
-        if (q.length < 10) return false;
         return true;
       })
       .map((item: any) => ({
@@ -2382,7 +2584,7 @@ Return ONLY valid JSON matching this schema:
         nextReviewDate: today,
         timesReviewed: 0,
         timesIncorrect: 0,
-        topic: item.topic || 'General',
+        topic: item.topic && item.topic !== 'General' ? item.topic.trim() : (item.concept_tested?.trim() || 'General'),
         isBookmarked: false,
         masteryLevel: 'new',
         correctReviewCount: 0,
@@ -2396,8 +2598,12 @@ Return ONLY valid JSON matching this schema:
     const rawQuiz: QuizQuestion[] = rawAiOutput.quiz
       .filter((item: any) => {
         const q = cleanQuestionText(item.question || '');
-        if (!q) {
-          console.log(`[Quiz Reject]: Missing question text.`);
+        if (!q || q.length < 15) {
+          console.log(`[Quiz Reject]: Question missing or shorter than 15 chars: "${q}"`);
+          return false;
+        }
+        if (startsWithSerialPrefix(q) || startsWithSerialPrefix(item.question || '')) {
+          console.log(`[Quiz Reject]: Question starts with serial prefix: "${item.question}"`);
           return false;
         }
         if (!Array.isArray(item.options) || item.options.length !== 4) {
@@ -2412,10 +2618,10 @@ Return ONLY valid JSON matching this schema:
         const options = item.options.map((o: any) => String(o).trim());
         const hasLongOption = options.some((opt: string) => {
           const wordCount = opt.split(/\s+/).length;
-          return wordCount > 10 || opt.length > 80 || opt.includes('\n');
+          return wordCount > 15 || opt.length > 100 || opt.includes('\n');
         });
         if (hasLongOption) {
-          console.log(`[Quiz Reject]: Option exceeds 10 words / 80 chars. Question: "${q}"`);
+          console.log(`[Quiz Reject]: Option exceeds 15 words / 100 chars. Question: "${q}"`);
           return false;
         }
         if (hasDuplicateOrOverlappingOptions(options)) {
@@ -2431,8 +2637,6 @@ Return ONLY valid JSON matching this schema:
         return options.some((option: string) => option.toLowerCase().replace(/[^a-z0-9]/g, '') === normalizedCorrect);
       })
       .map((item: any) => {
-        // Preserve complete model-written options. Truncation here used to change
-        // their meaning and could turn the first option into the "correct" one.
         const options = item.options.map((o: any) => String(o).trim());
         const correctNorm = String(item.correctAnswer).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
         const correctAnswer = options.find(
@@ -2444,8 +2648,8 @@ Return ONLY valid JSON matching this schema:
           question: cleanQuestionText(item.question),
           options,
           correctAnswer,
-          explanation: formatConciseSentence(item.explanation || 'Based on document content.', 25),
-          topic: item.topic || 'General',
+          explanation: formatConciseSentence(item.explanation || 'Based on document content.', 35),
+          topic: item.topic && item.topic !== 'General' ? item.topic.trim() : (item.concept_tested?.trim() || 'General'),
         };
       });
 
@@ -2458,23 +2662,7 @@ Return ONLY valid JSON matching this schema:
 
   flashcards = ensureQuestionDiversity(flashcards);
 
-  // FAIL-SAFE BACKUP: Supplement using offline generator if cards are low
-  const minRequiredCards = Math.max(6, Math.floor(targetFlashcards * 0.5));
-  const minRequiredQuiz = Math.max(5, Math.ceil(targetQuiz * 0.7));
-  if (flashcards.length < minRequiredCards || quiz.length < minRequiredQuiz) {
-    console.log(
-      `[AI Quality Gate]: Chunk yielded ${flashcards.length} flashcards & ${quiz.length} quiz questions. Supplementing with offline engine...`
-    );
-    const offlineBackup = generateOfflineStudyMaterial(
-      chunkText,
-      deckId,
-      targetFlashcards - flashcards.length,
-      Math.max(0, targetQuiz - quiz.length)
-    );
-    flashcards = [...flashcards, ...offlineBackup.flashcards];
-    quiz = ensureOptionUniquenessAcrossQuiz(deduplicateQuizQuestions([...quiz, ...offlineBackup.quiz]));
-  }
-
+  // Strictly return AI-generated validated output — no lazy regex supplementation
   return validateDeckQuality({
     flashcards,
     quiz: quiz.slice(0, targetQuiz),
@@ -2489,8 +2677,31 @@ export async function generateStudyMaterial(
   const cleaned = cleanDocumentText(text);
   const cleanLength = cleaned.length;
 
-  // DYNAMIC COUNT SCALING: a short deck should still have a meaningful quiz,
-  // while larger sources receive enough questions to cover multiple concepts.
+  if (cleanLength < 50) {
+    return {
+      flashcards: [],
+      quiz: [],
+      totalChunks: 1,
+    };
+  }
+
+  // PRIMARY HIGH-PRECISION PIPELINE: Strictly Grounded 3-Stage Generation with Source Quote Anchors
+  try {
+    console.log(`[Grounded Engine]: Initiating strictly-grounded generation for document (${cleanLength} chars)...`);
+    const grounded = await generateGroundedStudyMaterial(cleaned, deckId);
+    if (grounded.flashcards.length > 0 || grounded.quiz.length > 0) {
+      const validated = validateDeckQuality(grounded);
+      console.log(
+        `[Grounded Engine Success]: Generated deck with ${validated.flashcards.length} flashcards and ${validated.quiz.length} quiz questions.`
+      );
+      return validated;
+    }
+  } catch (err: any) {
+    console.warn('[Grounded Engine Warning]: Encountered error, invoking resilient fallback pass:', err?.message || err);
+  }
+
+  // RESILIENT MULTI-CHUNK FALLBACK
+  // DYNAMIC COUNT SCALING: scale target flashcards & quiz count with document size
   const totalTargetFlashcards = Math.max(12, Math.min(60, Math.round(cleanLength / 280)));
   const totalTargetQuiz = Math.max(10, Math.min(30, Math.round(totalTargetFlashcards / 2)));
 
@@ -2508,7 +2719,7 @@ export async function generateStudyMaterial(
   let hasQuotaNotice = false;
 
   for (let i = 0; i < chunks.length; i++) {
-    console.log(`[Chunk ${i + 1}/${chunks.length}]: Synthesizing section for deck ${deckId}...`);
+    console.log(`[Chunk ${i + 1}/${chunks.length}]: Synthesizing section for deck ${deckId} via LLM...`);
     try {
       const res = await generateSingleChunkMaterial(
         chunks[i],
@@ -2525,26 +2736,33 @@ export async function generateStudyMaterial(
       if (res.quiz && res.quiz.length > 0) {
         combinedQuiz.push(...res.quiz);
       }
-    } catch (err) {
-      console.warn(`[Chunk ${i + 1}/${chunks.length} Warning]: Falling back section to offline generator:`, err);
-      const offlineRes = generateOfflineStudyMaterial(chunks[i], deckId, flashcardsPerChunk, quizPerChunk);
-      combinedFlashcards.push(...offlineRes.flashcards);
-      combinedQuiz.push(...offlineRes.quiz);
+    } catch (err: any) {
+      console.warn(`[Chunk ${i + 1}/${chunks.length} Error]: Failed to generate chunk via LLM:`, err?.message || err);
+      skippedCount++;
     }
   }
 
-  // Final cross-chunk semantic deduplication, option uniqueness & syntactic question diversity enforcement
+  // Cross-chunk semantic deduplication, option uniqueness & syntactic question diversity
   let finalQuiz = ensureOptionUniquenessAcrossQuiz(
     ensureQuestionDiversity(deduplicateQuizQuestions(combinedQuiz))
   );
   let finalFlashcards = ensureQuestionDiversity(combinedFlashcards);
 
-  // ULTIMATE FAIL-SAFE: If entire deck has 0 cards, generate from full text immediately!
-  if (finalFlashcards.length === 0 || finalQuiz.length === 0) {
-    console.warn(`[Ultimate Fail-Safe]: Entire deck output was low. Running complete offline generator...`);
-    const fallback = generateOfflineStudyMaterial(cleaned, deckId, totalTargetFlashcards, totalTargetQuiz);
-    if (finalFlashcards.length === 0) finalFlashcards = fallback.flashcards;
-    if (finalQuiz.length === 0) finalQuiz = fallback.quiz;
+  // FAIL-SAFE: If individual chunks failed or yielded 0 items, retry with one direct whole-document LLM pass
+  if ((finalFlashcards.length === 0 || finalQuiz.length === 0) && cleaned.length >= 100) {
+    console.warn(`[AI Engine Notice]: Chunk pass yielded 0 items. Retrying direct whole-document LLM pass...`);
+    try {
+      const directMaterial = await generateSingleChunkMaterial(
+        cleaned.slice(0, 8000),
+        deckId,
+        totalTargetFlashcards,
+        totalTargetQuiz
+      );
+      if (finalFlashcards.length === 0) finalFlashcards = directMaterial.flashcards;
+      if (finalQuiz.length === 0) finalQuiz = directMaterial.quiz;
+    } catch (err: any) {
+      console.error(`[AI Direct Pass Failed]:`, err?.message || err);
+    }
   }
 
   const validated = validateDeckQuality({
@@ -2556,12 +2774,11 @@ export async function generateStudyMaterial(
   });
 
   console.log(
-    `[Multi-Chunk Engine Success]: Generated single deck with ${validated.flashcards.length} flashcards and ${validated.quiz.length} quiz questions from ${chunks.length} section(s).`
+    `[Multi-Chunk Engine Success]: Generated deck with ${validated.flashcards.length} flashcards and ${validated.quiz.length} quiz questions from ${chunks.length} section(s).`
   );
 
   return validated;
 }
-
 
 export async function generateEli5(
   question: string,
@@ -2607,97 +2824,12 @@ function generateOfflineStudyMaterial(
   targetFlashcards = 12,
   targetQuiz = 5
 ): GeneratedStudyMaterial {
-  const today = getTodayDateString();
-  const cleaned = cleanDocumentText(text);
-
-  // This is an extractive fallback, not a pretend AI generator. It only asks about
-  // complete source statements, which is less polished than the model but avoids
-  // fabricated claims and generic "What does this mechanism do?" questions.
-  const sentences = cleaned
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(
-      (s) =>
-        s.length > 45 &&
-        !isHeadingLine(s) &&
-        !isKeywordListAnswer(s)
-    );
-
-  const validSentences =
-    sentences.length > 0
-      ? sentences
-      : ['The supplied material did not contain enough complete explanatory statements to create a reliable study item.'];
-
-  const subjectFor = (sentence: string) => {
-    const match = sentence.match(/^(.{3,90}?)\s+(?:is|are|was|were|means|refers to|describes|explains|causes|caused|allows|enables|requires|uses|use|includes|involves|occurs|happens|can|will|may|should)\b/i);
-    const subject = (match?.[1] || sentence.split(/[,:;]/)[0]).replace(/^["'“”‘’\-–—\s]+|["'“”‘’\-–—\s]+$/g, '').trim();
-    return subject.length >= 3 && subject.length <= 90 ? subject : 'the source concept';
+  console.warn(
+    '[AI Engine Notice]: Rule-based and regex sentence-chopping fallbacks have been removed to preserve pedagogical quality. Please configure an AI API key (e.g. GEMINI_API_KEY) to generate study decks.'
+  );
+  return {
+    flashcards: [],
+    quiz: [],
+    quotaNotice: true,
   };
-
-  const shuffle = <T,>(items: T[]): T[] => {
-    const result = [...items];
-    for (let i = result.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [result[i], result[j]] = [result[j], result[i]];
-    }
-    return result;
-  };
-
-  const flashcardCount = Math.min(targetFlashcards, validSentences.length);
-  const flashcards: Flashcard[] = [];
-
-  for (let i = 0; i < flashcardCount; i++) {
-    const sentence = validSentences[i];
-    const subject = subjectFor(sentence);
-
-    flashcards.push({
-      id: uuidv4(),
-      deckId,
-      question: `How would you explain ${subject}?`,
-      answer: formatConciseSentence(sentence, 38),
-      difficulty: null,
-      intervalDays: 0,
-      nextReviewDate: today,
-      timesReviewed: 0,
-      timesIncorrect: 0,
-      topic: subject,
-      isBookmarked: false,
-      masteryLevel: 'new',
-      correctReviewCount: 0,
-      lastReviewedDate: null,
-      isWeakTopicReviewed: false,
-    });
-  }
-
-  // Each usable source statement can form one question. Its three distractors
-  // are drawn from other statements in the same source, so we can cover more
-  // concepts without inventing facts.
-  const quizCount = validSentences.length >= 4 ? Math.min(targetQuiz, Math.floor(validSentences.length / 4)) : 0;
-  const rawQuiz: QuizQuestion[] = [];
-
-  for (let i = 0; i < quizCount; i++) {
-    const targetIdx = i * 4;
-    const targetSentence = validSentences[targetIdx];
-    const correctAnswer = formatShortOption(targetSentence, 10);
-    const distractors = validSentences
-      .slice(targetIdx + 1, targetIdx + 4)
-      .map((sentence) => formatShortOption(sentence, 10));
-    if (distractors.length !== 3 || new Set([correctAnswer, ...distractors]).size !== 4) continue;
-    const subject = subjectFor(targetSentence);
-    const options = shuffle([correctAnswer, ...distractors]);
-
-    rawQuiz.push({
-      id: uuidv4(),
-      question: `Which statement about ${subject} is supported by the source?`,
-      options,
-      correctAnswer,
-      explanation: `The source states: ${formatConciseSentence(targetSentence, 28)}`,
-      topic: subject,
-    });
-  }
-
-  const quiz = ensureOptionUniquenessAcrossQuiz(deduplicateQuizQuestions(rawQuiz));
-  const finalFlashcards = ensureQuestionDiversity(flashcards);
-
-  return { flashcards: finalFlashcards, quiz };
 }

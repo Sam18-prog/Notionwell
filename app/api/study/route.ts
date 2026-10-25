@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateStudyMaterial, generateEli5 } from '@/lib/app';
+import { generateStudyMaterial, generateEli5, cleanDocumentText } from '@/lib/app';
 import { processDocumentMultimodal } from '@/lib/documentProcessor';
 import { checkGenerationRateLimit, MAX_DOCUMENT_CHARS } from '@/lib/rateLimit';
 
@@ -96,9 +96,10 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      const sanitizedText = cleanDocumentText(trimmed);
       return NextResponse.json({
         success: true,
-        text: trimmed,
+        text: sanitizedText || trimmed,
         sourceType,
         imageUrl,
         isScannedOcr,
@@ -163,9 +164,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log(`[AI Generation Input]: Sending ${trimmedInput.length} chars to AI prompt. Snippet: "${trimmedInput.slice(0, 120)}..."`);
+    const sanitizedInput = cleanDocumentText(trimmedInput);
+    console.log(`[AI Generation Input]: Sending ${sanitizedInput.length} chars to AI prompt. Snippet: "${sanitizedInput.slice(0, 120)}..."`);
 
-    const material = await generateStudyMaterial(trimmedInput, deckId || 'temp-deck-id');
+    const material = await generateStudyMaterial(sanitizedInput, deckId || 'temp-deck-id');
+    if (material.flashcards.length === 0 && material.quiz.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Could not generate high-quality study materials from this text. Please ensure the document contains descriptive explanations, definitions, or conceptual content rather than only lists or syllabus headers.",
+        },
+        { status: 422 }
+      );
+    }
     return NextResponse.json({
       success: true,
       flashcards: material.flashcards,
