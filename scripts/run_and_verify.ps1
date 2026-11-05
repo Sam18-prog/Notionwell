@@ -4,6 +4,9 @@ Write-Host "Started Next.js server with PID $($server.Id)... Waiting 5s for warm
 Start-Sleep -Seconds 5
 
 try {
+    Write-Host "`nRunning verify_landing_and_demo.js..."
+    node ./scripts/verify_landing_and_demo.js
+
     Write-Host "`nRunning verify_production_endpoints.js..."
     node ./scripts/verify_production_endpoints.js
 

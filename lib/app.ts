@@ -23,6 +23,13 @@ export {
   verifyQuizQuestion,
 };
 
+import {
+  getStoredDemoDecks,
+  saveStoredDemoDecks,
+  DEMO_SUBJECT,
+  isDemoSession,
+} from './demoData';
+
 // ============================================================================
 // DATA MODELS
 // ============================================================================
@@ -691,9 +698,22 @@ function getRawSubjects(): Subject[] {
 export function getSubjects(): Subject[] {
   if (!isBrowser()) return DEFAULT_SUBJECTS;
   migrateStorageData();
-  if (cachedSubjects) return cachedSubjects;
-  const raw = getRawSubjects();
-  cachedSubjects = raw.length > 0 ? raw : DEFAULT_SUBJECTS;
+  let baseSubjects = cachedSubjects || (getRawSubjects().length > 0 ? getRawSubjects() : DEFAULT_SUBJECTS);
+  if (isDemoSession()) {
+    if (!baseSubjects.some((s) => s.id === DEMO_SUBJECT.id)) {
+      baseSubjects = [
+        {
+          id: DEMO_SUBJECT.id,
+          name: DEMO_SUBJECT.name,
+          colorTag: DEMO_SUBJECT.colorTag || '#2563EB',
+          icon: DEMO_SUBJECT.icon || 'Network',
+          createdAt: DEMO_SUBJECT.createdAt || new Date().toISOString(),
+        },
+        ...baseSubjects,
+      ];
+    }
+  }
+  cachedSubjects = baseSubjects;
   return cachedSubjects;
 }
 
@@ -740,14 +760,21 @@ export function deleteSubject(id: string): void {
 export function getDecks(): Deck[] {
   if (!isBrowser()) return [];
   migrateStorageData();
-  if (cachedDecks) return cachedDecks;
+  if (cachedDecks && cachedDecks.length > 0) return cachedDecks;
   try {
     const raw = localStorage.getItem(DECKS_KEY);
-    cachedDecks = raw ? JSON.parse(raw) : [];
-    return cachedDecks!;
-  } catch (err) {
-    return [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (parsed && parsed.length > 0) {
+      cachedDecks = parsed;
+      return cachedDecks!;
+    }
+  } catch (err) {}
+
+  if (isDemoSession()) {
+    return getStoredDemoDecks();
   }
+
+  return [];
 }
 
 // ============================================================================
@@ -1030,6 +1057,18 @@ export function saveDeck(deck: Deck): void {
   const subjects = getSubjects();
   const validSubjectId = deck.subjectId || subjects[0]?.id || 'subject-uncategorized';
   const finalDeck = { ...deck, subjectId: validSubjectId };
+
+  if (finalDeck.id.startsWith('demo-')) {
+    const demoDecks = getStoredDemoDecks();
+    const dIdx = demoDecks.findIndex((d) => d.id === finalDeck.id);
+    if (dIdx >= 0) {
+      demoDecks[dIdx] = finalDeck;
+    } else {
+      demoDecks.push(finalDeck);
+    }
+    saveStoredDemoDecks(demoDecks);
+    return;
+  }
 
   const decks = getDecks();
   const index = decks.findIndex((d) => d.id === finalDeck.id);

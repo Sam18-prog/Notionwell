@@ -97,9 +97,9 @@ export default function Sidebar() {
   const navItems = [
     {
       label: 'Dashboard',
-      href: '/',
+      href: '/dashboard',
       icon: LayoutDashboard,
-      active: pathname === '/',
+      active: pathname === '/dashboard' || pathname === '/',
     },
     {
       label: 'AI Study Assistant',

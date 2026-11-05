@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Inter, Outfit } from 'next/font/google';
 import './globals.css';
-import Sidebar from '@/components/Sidebar';
+import AppShell from '@/components/AppShell';
 import BadgeToast from '@/components/BadgeToast';
 import SupabaseAuthSync from '@/components/SupabaseAuthSync';
 
@@ -105,21 +105,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.variable} ${outfit.variable} font-sans bg-[#F6F8FC] dark:bg-[#0B1220] text-[#0F172A] dark:text-[#F8FAFC] min-h-screen transition-colors duration-200`}>
         <SupabaseAuthSync />
-        <div className="min-h-screen flex flex-col lg:flex-row">
-          {/* REUSABLE COLLAPSIBLE SIDEBAR */}
-          <Sidebar />
-
-          {/* MAIN CONTENT AREA — SHIFTS DYNAMICALLY NEXT TO SIDEBAR */}
-          <div className="flex-1 flex flex-col min-w-0 lg:pl-64 transition-all duration-300">
-            <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-              {children}
-            </main>
-
-            <footer className="border-t border-[#E2E8F0] dark:border-[#263449] py-6 text-center text-xs text-[#64748B] dark:text-[#94A3B8] bg-[#F6F8FC] dark:bg-[#0B1220]">
-              <p>Notionwell &copy; {new Date().getFullYear()} — Spaced Repetition & AI Quiz Assistant</p>
-            </footer>
-          </div>
-        </div>
+        <AppShell>{children}</AppShell>
 
         {/* GLOBAL BADGE UNLOCK TOAST NOTIFICATION */}
         <BadgeToast />

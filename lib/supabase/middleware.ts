@@ -41,6 +41,7 @@ export async function updateSession(request: NextRequest) {
   // Protected route checking
   const pathname = request.nextUrl.pathname;
   const isProtectedRoute =
+    pathname.startsWith('/dashboard') ||
     pathname.startsWith('/create') ||
     pathname.startsWith('/deck') ||
     pathname.startsWith('/decks') ||

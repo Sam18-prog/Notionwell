@@ -25,7 +25,8 @@ import {
 function AuthForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectTarget = searchParams?.get('redirect') || '/';
+  const rawRedirect = searchParams?.get('redirect');
+  const redirectTarget = rawRedirect && rawRedirect !== '/' ? rawRedirect : '/dashboard';
   const urlError = searchParams?.get('error');
 
   const [tab, setTab] = useState<'login' | 'signup' | 'forgot'>('login');
@@ -152,7 +153,7 @@ function AuthForm() {
       window.dispatchEvent(new Event('auth-change'));
     }
 
-    router.push(redirectTarget);
+    router.push(rawRedirect || '/demo');
     router.refresh();
   };
 

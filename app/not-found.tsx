@@ -20,10 +20,17 @@ export default function NotFound() {
         <div className="pt-2 flex items-center justify-center gap-3">
           <Link
             href="/"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-white dark:bg-[#111827] text-xs font-bold shadow-xs hover:bg-[#F8FAFC] transition-all"
+          >
+            <Home className="w-4 h-4 text-[#2563EB]" />
+            <span>Home</span>
+          </Link>
+          <Link
+            href="/dashboard"
             className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs shadow-md transition-all"
           >
-            <Home className="w-4 h-4" />
-            <span>Go to Dashboard</span>
+            <span>Dashboard</span>
+            <ArrowLeft className="w-4 h-4 rotate-180" />
           </Link>
         </div>
       </div>

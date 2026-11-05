@@ -49,11 +49,11 @@ export default function GlobalError({
           </button>
 
           <Link
-            href="/"
+            href="/dashboard"
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#CBD5E1] dark:border-[#334155] hover:border-[#2563EB] text-xs font-bold transition-all text-[#64748B] dark:text-[#CBD5E1]"
           >
             <Home className="w-3.5 h-3.5" />
-            <span>Return to Dashboard</span>
+            <span>Go to Dashboard</span>
           </Link>
         </div>
       </div>
