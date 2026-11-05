@@ -45,6 +45,8 @@ export interface Flashcard {
   timesReviewed: number;
   timesIncorrect: number;
   topic: string;
+  easinessFactor?: number;
+  repetitionCount?: number;
   isBookmarked?: boolean; // Bookmark flag for important cards
   masteryLevel?: 'new' | 'learning' | 'mastered';
   correctReviewCount?: number;

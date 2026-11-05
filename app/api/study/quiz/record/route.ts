@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
 
     const userId = session.id;
 
-    const attempt = recordQuizAttempt(
+    const attempt = await recordQuizAttempt(
       userId,
       deckId,
       deckName,

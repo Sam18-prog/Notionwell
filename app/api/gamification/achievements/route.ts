@@ -29,9 +29,11 @@ export async function GET(req: NextRequest) {
 
     const userId = session.id;
     const decks = getDecks();
-    const streakInfo = calculateStreaks(userId);
-    const quizAttempts = getUserQuizAttempts(userId);
-    const examAttempts = getUserExamAttempts(userId);
+    const [streakInfo, quizAttempts, examAttempts] = await Promise.all([
+      calculateStreaks(userId),
+      getUserQuizAttempts(userId),
+      getUserExamAttempts(userId),
+    ]);
 
     let cardsReviewed = 0;
     let masteredCardsCount = 0;
@@ -48,7 +50,7 @@ export async function GET(req: NextRequest) {
       (d) => d.flashcards.length > 0 && d.flashcards.every((c) => c.masteryLevel === 'mastered')
     );
 
-    const achievements = getUserAchievements(userId, {
+    const achievements = await getUserAchievements(userId, {
       totalSessions: streakInfo.activeDates.length,
       streakDays: streakInfo.currentStreak,
       cardsReviewed,

@@ -212,12 +212,12 @@ export default function InsightsPage() {
             <div className="w-full sm:w-64 space-y-1.5">
               <div className="flex items-center justify-between text-[11px] font-bold text-slate-300">
                 <span>Level Progress</span>
-                <span>{levelInfo.progressPercentage}%</span>
+                <span>{levelInfo.levelProgressPercentage || levelInfo.progressPercentage || 0}%</span>
               </div>
               <div className="w-full bg-slate-700/60 rounded-full h-2.5 overflow-hidden">
                 <div
                   className="bg-gradient-to-r from-amber-400 to-orange-500 h-full rounded-full transition-all duration-500"
-                  style={{ width: `${levelInfo.progressPercentage}%` }}
+                  style={{ width: `${levelInfo.levelProgressPercentage || levelInfo.progressPercentage || 0}%` }}
                 />
               </div>
             </div>
@@ -657,12 +657,12 @@ export default function InsightsPage() {
                 <div className="w-full mt-2 space-y-1">
                   <div className="flex items-center justify-between text-[9px] font-bold text-[#64748B]">
                     <span>Progress</span>
-                    <span>{badge.currentProgress}/{badge.threshold}</span>
+                    <span>{badge.currentProgress ?? badge.progress ?? 0}/{badge.threshold}</span>
                   </div>
                   <div className="w-full bg-[#E2E8F0] dark:bg-[#263449] rounded-full h-1.5 overflow-hidden">
                     <div
                       className="bg-blue-500 h-full rounded-full"
-                      style={{ width: `${Math.min(100, (badge.currentProgress / badge.threshold) * 100)}%` }}
+                      style={{ width: `${Math.min(100, (((badge.currentProgress ?? badge.progress ?? 0) / (badge.threshold || 1)) * 100))}%` }}
                     />
                   </div>
                 </div>

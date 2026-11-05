@@ -30,9 +30,9 @@ export async function GET(req: NextRequest) {
     }
 
     const userId = session.id;
-    const totalXP = getUserTotalXP(userId);
+    const totalXP = await getUserTotalXP(userId);
     const levelInfo = calculateLevelFromXP(totalXP);
-    const transactions = getUserXPTransactions(userId);
+    const transactions = await getUserXPTransactions(userId);
 
     return NextResponse.json({
       success: true,

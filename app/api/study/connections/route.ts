@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUserSession } from '@/lib/auth-server';
 import { discoverCrossDocumentConnections } from '@/lib/intelligence';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getAuthenticatedUserSession(req);

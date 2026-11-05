@@ -34,10 +34,10 @@ export async function GET(req: NextRequest) {
     }
 
     const userId = session.id;
-    const goals = getLearningGoals(userId);
+    const goals = await getLearningGoals(userId);
     const decks = getDecks();
-    const quizAttempts = getUserQuizAttempts(userId);
-    const examAttempts = getUserExamAttempts(userId);
+    const quizAttempts = await getUserQuizAttempts(userId);
+    const examAttempts = await getUserExamAttempts(userId);
 
     // Calculate today's activity
     const todayStr = new Date().toISOString().split('T')[0];
@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
       weeklyExamsCompleted: Math.max(0, parseInt(weeklyExamsCompleted, 10) || 1),
     };
 
-    saveLearningGoals(updatedGoals);
+    await saveLearningGoals(updatedGoals);
 
     return NextResponse.json({
       success: true,

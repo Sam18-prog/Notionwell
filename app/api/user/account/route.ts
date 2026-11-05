@@ -39,11 +39,13 @@ export async function DELETE(req: NextRequest) {
 
     logInfo('User initiated permanent account deletion', { userId });
 
-    // 1. Purge local memory & disk storage
-    purgeUserRAGData(userId);
-    purgeUserExamData(userId);
-    purgeUserAnalyticsData(userId);
-    purgeUserIntelligenceData(userId);
+    // 1. Purge storage and Supabase user records
+    await Promise.allSettled([
+      purgeUserRAGData(userId),
+      purgeUserExamData(userId),
+      purgeUserAnalyticsData(userId),
+      purgeUserIntelligenceData(userId),
+    ]);
 
     // 2. Cascade delete from Supabase PostgreSQL tables if connected
     try {

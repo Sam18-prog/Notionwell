@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     const userId = session.id;
 
     // 1. Gather text from the selected documents belonging to this user
-    const docs = getStoredDocuments(userId, deckId);
+    const docs = await getStoredDocuments(userId, deckId);
     const selectedDocs = documentIds.length > 0
       ? docs.filter((d) => documentIds.includes(d.id))
       : docs;

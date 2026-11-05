@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const deckId = req.nextUrl.searchParams.get('deckId') || undefined;
 
     // Retrieve from vector store for this specific user
-    let docs = getStoredDocuments(userId, deckId);
+    let docs = await getStoredDocuments(userId, deckId);
 
     // If cache is empty, attempt to hydrate from Supabase
     if (docs.length === 0) {
@@ -183,21 +183,24 @@ export async function DELETE(req: NextRequest) {
     }
 
     // Verify ownership before deleting
-    const userDocs = getStoredDocuments(session.id);
-    const existingDoc = userDocs.find(d => d.id === documentId);
-    if (!existingDoc && !session.isDemo) {
-      // Check Supabase
-      const admin = createAdminClient();
-      const { data: dbDoc } = await admin.from('documents').select('user_id').eq('id', documentId).maybeSingle();
-      if (!dbDoc || dbDoc.user_id !== session.id) {
-        return NextResponse.json({ success: false, error: 'Document not found or access denied.' }, { status: 404 });
-      }
+    const userDocs = await getStoredDocuments(session.id);
+    let existingDoc = userDocs.find(d => d.id === documentId);
+    if (!existingDoc) {
+      // Check Supabase directly
+      try {
+        const admin = createAdminClient();
+        const { data: dbDoc } = await admin.from('documents').select('user_id').eq('id', documentId).maybeSingle();
+        if (dbDoc && (dbDoc.user_id === session.id || session.isDemo)) {
+          existingDoc = { id: documentId } as any;
+        }
+      } catch (e) {}
     }
 
-    const deleted = deleteStoredDocument(documentId, session.id);
-    if (!deleted && !existingDoc) {
+    if (!existingDoc) {
       return NextResponse.json({ success: false, error: 'Document not found or access denied.' }, { status: 404 });
     }
+
+    const deleted = await deleteStoredDocument(documentId, session.id);
 
     // Also remove from Supabase
     try {

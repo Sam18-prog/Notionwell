@@ -6,6 +6,8 @@ import {
   rescheduleStudyPath,
 } from '@/lib/intelligence';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -16,7 +18,7 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const details = getStudyPathDetails(params.id, session.id);
+    const details = await getStudyPathDetails(params.id, session.id);
     if (!details) {
       return NextResponse.json({ success: false, error: 'Study path not found.' }, { status: 404 });
     }
@@ -50,7 +52,7 @@ export async function PATCH(
         return NextResponse.json({ success: false, error: 'taskId is required.' }, { status: 400 });
       }
 
-      const res = toggleStudyPathTask(taskId, session.id);
+      const res = await toggleStudyPathTask(taskId, session.id);
       if (!res.success) {
         return NextResponse.json({ success: false, error: 'Task not found or unauthorized.' }, { status: 404 });
       }
@@ -64,7 +66,7 @@ export async function PATCH(
         return NextResponse.json({ success: false, error: 'newTargetDate is required.' }, { status: 400 });
       }
 
-      const res = rescheduleStudyPath(params.id, session.id, newTargetDate, dailyMinutes);
+      const res = await rescheduleStudyPath(params.id, session.id, newTargetDate, dailyMinutes);
       if (!res.success) {
         return NextResponse.json({ success: false, error: 'Path not found or unauthorized.' }, { status: 404 });
       }

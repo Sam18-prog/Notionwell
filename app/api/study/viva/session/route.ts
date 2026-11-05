@@ -5,6 +5,8 @@ import {
   getUserVivaHistory,
 } from '@/lib/intelligence';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getAuthenticatedUserSession(req);
@@ -12,7 +14,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const history = getUserVivaHistory(session.id);
+    const history = await getUserVivaHistory(session.id);
     return NextResponse.json({ success: true, history });
   } catch (error: any) {
     console.error('[API /api/study/viva/session GET error]:', error);

@@ -51,9 +51,9 @@ export async function GET(req: NextRequest) {
     const decks = getDecks();
     const subjects = getSubjects();
     const workload = calculateReviewWorkload(decks, subjects);
-    const streakInfo = calculateStreaks(userId);
-    const quizAttempts = getUserQuizAttempts(userId);
-    const examAttempts = getUserExamAttempts(userId);
+    const streakInfo = await calculateStreaks(userId);
+    const quizAttempts = await getUserQuizAttempts(userId);
+    const examAttempts = await getUserExamAttempts(userId);
 
     // Collect verified academic performance signals
     const weakTopics: Array<{ topic: string; missCount: number; source: string }> = [];

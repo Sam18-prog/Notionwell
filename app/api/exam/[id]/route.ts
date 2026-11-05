@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getExamConfigById, getSanitizedExamForTaking } from '@/lib/exam';
 import { getAuthenticatedUserSession } from '@/lib/auth-server';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const session = await getAuthenticatedUserSession(req);
@@ -21,14 +23,14 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     if (isTaking) {
       // Return sanitized exam without answer keys
-      const sanitized = getSanitizedExamForTaking(examId);
+      const sanitized = await getSanitizedExamForTaking(examId);
       if (!sanitized) {
         return NextResponse.json({ success: false, error: 'Exam not found' }, { status: 404 });
       }
       return NextResponse.json({ success: true, exam: sanitized });
     }
 
-    const fullExam = getExamConfigById(examId);
+    const fullExam = await getExamConfigById(examId);
     if (!fullExam) {
       return NextResponse.json({ success: false, error: 'Exam not found' }, { status: 404 });
     }

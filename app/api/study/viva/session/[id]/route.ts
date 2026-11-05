@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuthenticatedUserSession } from '@/lib/auth-server';
 import { getVivaSessionDetails } from '@/lib/intelligence';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -12,7 +14,7 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const details = getVivaSessionDetails(params.id, session.id);
+    const details = await getVivaSessionDetails(params.id, session.id);
     if (!details) {
       return NextResponse.json({ success: false, error: 'Viva session not found.' }, { status: 404 });
     }

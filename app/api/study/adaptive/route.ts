@@ -5,6 +5,8 @@ import {
   recordAdaptiveAttempt,
 } from '@/lib/intelligence';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getAuthenticatedUserSession(req);
@@ -12,7 +14,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const profiles = getUserAdaptiveProfiles(session.id);
+    const profiles = await getUserAdaptiveProfiles(session.id);
     return NextResponse.json({ success: true, profiles });
   } catch (error: any) {
     console.error('[API /api/study/adaptive GET error]:', error);
@@ -40,7 +42,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const profile = recordAdaptiveAttempt(
+    const profile = await recordAdaptiveAttempt(
       session.id,
       topic,
       correct,

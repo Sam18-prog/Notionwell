@@ -1,11 +1,9 @@
 /**
  * Notionwell RAG — Vector Store & Similarity Retrieval Layer
- * Manages document chunks, vector embeddings, and hybrid semantic-keyword similarity search.
- * Dual-persistence: Local disk store (.rag_storage/) with Supabase PostgreSQL pgvector background sync.
+ * Authoritative Supabase PostgreSQL Persistence with Zero Filesystem Dependencies.
+ * Eliminates /var/task/.rag_storage runtime crashes on Vercel Serverless.
  */
 
-import fs from 'fs';
-import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { chunkDocumentText } from './chunker';
 import { generateEmbedding, generateBatchEmbeddings, cosineSimilarity } from './embeddings';
@@ -51,11 +49,10 @@ export interface VectorSearchOptions {
   minSimilarity?: number;
 }
 
-// Global singleton in-memory runtime cache for instant sub-millisecond retrieval across Next.js route bundles
+// In-memory runtime cache for fast response within active instance
 const globalForRAG = globalThis as unknown as {
   __notionwell_runtimeDocs?: Map<string, StoredDocument>;
   __notionwell_runtimeChunks?: Map<string, StoredChunk[]>;
-  __notionwell_isLoaded?: boolean;
 };
 
 const runtimeDocuments: Map<string, StoredDocument> =
@@ -63,67 +60,9 @@ const runtimeDocuments: Map<string, StoredDocument> =
 const runtimeChunks: Map<string, StoredChunk[]> =
   globalForRAG.__notionwell_runtimeChunks ?? (globalForRAG.__notionwell_runtimeChunks = new Map());
 
-// Storage directory on disk
-const STORAGE_DIR = path.join(process.cwd(), '.rag_storage');
-const DOCS_FILE = path.join(STORAGE_DIR, 'documents.json');
-const CHUNKS_FILE = path.join(STORAGE_DIR, 'chunks.json');
-
-/**
- * Loads documents and chunks from local disk persistence if memory cache is empty.
- */
-function ensureStoreLoaded(): void {
-  if (globalForRAG.__notionwell_isLoaded && runtimeDocuments.size > 0) {
-    return;
-  }
-
-  try {
-    if (!fs.existsSync(STORAGE_DIR)) {
-      fs.mkdirSync(STORAGE_DIR, { recursive: true });
-    }
-
-    if (fs.existsSync(DOCS_FILE)) {
-      const raw = fs.readFileSync(DOCS_FILE, 'utf8');
-      const docs: StoredDocument[] = JSON.parse(raw);
-      for (const d of docs) {
-        runtimeDocuments.set(d.id, d);
-      }
-    }
-
-    if (fs.existsSync(CHUNKS_FILE)) {
-      const raw = fs.readFileSync(CHUNKS_FILE, 'utf8');
-      const chunksMap: Record<string, StoredChunk[]> = JSON.parse(raw);
-      for (const [docId, chunks] of Object.entries(chunksMap)) {
-        runtimeChunks.set(docId, chunks);
-      }
-    }
-
-    globalForRAG.__notionwell_isLoaded = true;
-    console.log(`[VectorStore] Loaded from disk: ${runtimeDocuments.size} documents, ${runtimeChunks.size} chunk sets.`);
-  } catch (err: any) {
-    console.warn('[VectorStore] Notice: Disk storage load skipped:', err?.message);
-  }
-}
-
-/**
- * Persists current documents and chunks to local disk.
- */
-function persistStoreToDisk(): void {
-  try {
-    if (!fs.existsSync(STORAGE_DIR)) {
-      fs.mkdirSync(STORAGE_DIR, { recursive: true });
-    }
-
-    const docsList = Array.from(runtimeDocuments.values());
-    fs.writeFileSync(DOCS_FILE, JSON.stringify(docsList, null, 2), 'utf8');
-
-    const chunksObj: Record<string, StoredChunk[]> = {};
-    for (const [docId, chunks] of runtimeChunks.entries()) {
-      chunksObj[docId] = chunks;
-    }
-    fs.writeFileSync(CHUNKS_FILE, JSON.stringify(chunksObj), 'utf8');
-  } catch (err: any) {
-    console.warn('[VectorStore] Notice: Disk storage write skipped:', err?.message);
-  }
+function isUUID(str?: string | null): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
 }
 
 /**
@@ -140,59 +79,48 @@ function calculateKeywordScore(query: string, content: string, heading?: string)
 
   const contentLower = content.toLowerCase();
   const headingLower = (heading || '').toLowerCase();
-  let matches = 0;
 
+  let matchPoints = 0;
   for (const term of queryTerms) {
     if (headingLower.includes(term)) {
-      matches += 1.5; // Heading matches carry higher weight
-    } else if (contentLower.includes(term)) {
-      matches += 1.0;
+      matchPoints += 3; // strong heading relevance
+    }
+    if (contentLower.includes(term)) {
+      matchPoints += 1;
     }
   }
 
-  return Math.min(1.0, matches / queryTerms.length);
+  const maxPossible = queryTerms.length * 4;
+  return Math.min(1.0, matchPoints / maxPossible);
 }
 
 /**
- * Indexes a document into chunks, generates vector embeddings, and stores them.
+ * Ingests, chunks, embeds and persists a document with its chunks into Supabase.
  */
-export async function indexDocumentForRAG(params: {
+export async function storeDocumentWithChunks(options: {
   documentId?: string;
   userId: string;
   deckId?: string | null;
   fileName: string;
-  fileType?: 'pdf' | 'docx' | 'txt' | 'image' | 'notes';
+  fileType: 'pdf' | 'docx' | 'txt' | 'image' | 'notes';
   rawText: string;
 }): Promise<{ document: StoredDocument; chunks: StoredChunk[] }> {
-  ensureStoreLoaded();
+  const { userId, deckId, fileName, fileType, rawText } = options;
+  const documentId = options.documentId || uuidv4();
+  const now = new Date().toISOString();
 
-  const {
-    documentId = uuidv4(),
-    userId,
-    deckId = null,
-    fileName,
-    fileType = 'txt',
-    rawText,
-  } = params;
-
-  // 1. Chunk document text
+  // 1. Text chunking
   const chunkDrafts = chunkDocumentText(rawText);
-  if (chunkDrafts.length === 0) {
-    throw new Error('Document does not contain enough extractable text to index.');
-  }
 
-  // 2. Generate vector embeddings for all chunks in batch
-  const textsToEmbed = chunkDrafts.map((c) =>
-    c.heading ? `${c.heading}\n\n${c.content}` : c.content
-  );
-  const embeddings = await generateBatchEmbeddings(textsToEmbed);
+  // 2. Batch embedding generation (Gemini text-embedding-004)
+  const chunkTexts = chunkDrafts.map((c) => (c.heading ? `${c.heading}\n${c.content}` : c.content));
+  const embeddings = await generateBatchEmbeddings(chunkTexts);
 
   // 3. Construct stored records
-  const now = new Date().toISOString();
   const storedDoc: StoredDocument = {
     id: documentId,
     userId,
-    deckId,
+    deckId: isUUID(deckId) ? deckId : null,
     fileName,
     fileType,
     characterCount: rawText.length,
@@ -204,7 +132,7 @@ export async function indexDocumentForRAG(params: {
     id: uuidv4(),
     documentId,
     userId,
-    deckId,
+    deckId: isUUID(deckId) ? deckId : null,
     chunkIndex: draft.chunkIndex,
     heading: draft.heading,
     content: draft.content,
@@ -212,18 +140,17 @@ export async function indexDocumentForRAG(params: {
     createdAt: now,
   }));
 
-  // 4. Save to runtime cache and persist to disk
+  // Update in-memory runtime cache
   runtimeDocuments.set(documentId, storedDoc);
   runtimeChunks.set(documentId, storedChunks);
-  persistStoreToDisk();
 
-  // 5. Asynchronously persist to Supabase PostgreSQL if admin client available
+  // Authoritative persistence in Supabase PostgreSQL
   try {
     const admin = createAdminClient();
     await admin.from('documents').upsert({
       id: documentId,
       user_id: userId,
-      deck_id: deckId || null,
+      deck_id: isUUID(deckId) ? deckId : null,
       file_name: fileName,
       storage_path: `documents/${userId}/${documentId}`,
       mime_type: fileType,
@@ -232,18 +159,20 @@ export async function indexDocumentForRAG(params: {
       is_processed: true,
     }, { onConflict: 'id' });
 
-    const chunkInserts = storedChunks.map((c) => ({
-      id: c.id,
-      document_id: documentId,
-      user_id: userId,
-      chunk_index: c.chunkIndex,
-      heading: c.heading || null,
-      content: c.content,
-      embedding: c.embedding.length === 768 ? c.embedding : null,
-    }));
-    await admin.from('document_chunks').upsert(chunkInserts, { onConflict: 'id' });
+    if (storedChunks.length > 0) {
+      const chunkInserts = storedChunks.map((c) => ({
+        id: c.id,
+        document_id: documentId,
+        user_id: userId,
+        chunk_index: c.chunkIndex,
+        heading: c.heading || null,
+        content: c.content,
+        embedding: c.embedding && c.embedding.length === 768 ? c.embedding : null,
+      }));
+      await admin.from('document_chunks').upsert(chunkInserts, { onConflict: 'id' });
+    }
   } catch (err: any) {
-    console.warn('[VectorStore] Supabase DB notice (using disk persistence):', err?.message);
+    console.warn('[VectorStore] Supabase DB write notice:', err?.message);
   }
 
   return { document: storedDoc, chunks: storedChunks };
@@ -256,8 +185,6 @@ export async function indexDocumentForRAG(params: {
 export async function searchRelevantChunks(
   options: VectorSearchOptions
 ): Promise<ScoredChunk[]> {
-  ensureStoreLoaded();
-
   const {
     userId,
     query,
@@ -272,45 +199,82 @@ export async function searchRelevantChunks(
   // 1. Generate query embedding vector (768-dim)
   const queryEmbedding = await generateEmbedding(query);
 
-  // 2. Collect candidate chunks matching document filters with strict user isolation
-  const candidateChunks: Array<{ chunk: StoredChunk; doc: StoredDocument }> = [];
+  // 2. Fetch candidate chunks from Supabase or runtime cache
+  let candidateChunks: Array<{ chunk: StoredChunk; docName: string }> = [];
 
-  for (const [docId, doc] of runtimeDocuments.entries()) {
-    // Strict multi-tenant isolation: document MUST belong to this user or be public shared
-    const isOwner =
-      doc.userId === userId ||
-      doc.userId === 'shared' ||
-      (doc.userId === 'default-user' && userId === 'default-user');
-    if (!isOwner) continue;
+  try {
+    const admin = createAdminClient();
+    let queryBuilder = admin
+      .from('document_chunks')
+      .select('id, document_id, user_id, chunk_index, heading, content, embedding, created_at, documents(file_name)')
+      .eq('user_id', userId);
 
-    // If specific document IDs or names are requested by user, check them
     if (documentIds && documentIds.length > 0) {
-      const matchesDoc = documentIds.includes(docId) || documentIds.includes(doc.fileName);
-      if (!matchesDoc) continue;
-    } else {
-      if (deckId && doc.deckId && doc.deckId !== deckId) continue;
+      const validDocUuids = documentIds.filter((id) => isUUID(id));
+      if (validDocUuids.length > 0) {
+        queryBuilder = queryBuilder.in('document_id', validDocUuids);
+      }
     }
 
-    const chunks = runtimeChunks.get(docId) || [];
-    for (const chunk of chunks) {
-      candidateChunks.push({ chunk, doc });
+    const { data: dbChunks, error: dbErr } = await queryBuilder;
+
+    if (!dbErr && Array.isArray(dbChunks) && dbChunks.length > 0) {
+      candidateChunks = dbChunks.map((row: any) => ({
+        chunk: {
+          id: row.id,
+          documentId: row.document_id,
+          userId: row.user_id,
+          deckId: null,
+          chunkIndex: row.chunk_index,
+          heading: row.heading || undefined,
+          content: row.content,
+          embedding: typeof row.embedding === 'string' ? JSON.parse(row.embedding) : (Array.isArray(row.embedding) ? row.embedding : []),
+          createdAt: row.created_at,
+        },
+        docName: row.documents?.file_name || 'Uploaded Document',
+      }));
+    }
+  } catch (dbErr: any) {
+    console.warn('[searchRelevantChunks] Supabase query notice:', dbErr?.message);
+  }
+
+  // Fallback to runtime memory cache if db was empty
+  if (candidateChunks.length === 0) {
+    for (const [docId, doc] of runtimeDocuments.entries()) {
+      const isOwner =
+        doc.userId === userId ||
+        doc.userId === 'shared' ||
+        (doc.userId === 'default-user' && userId === 'default-user');
+      if (!isOwner) continue;
+
+      if (documentIds && documentIds.length > 0) {
+        const matchesDoc = documentIds.includes(docId) || documentIds.includes(doc.fileName);
+        if (!matchesDoc) continue;
+      } else if (deckId && doc.deckId && doc.deckId !== deckId) {
+        continue;
+      }
+
+      const chunks = runtimeChunks.get(docId) || [];
+      for (const chunk of chunks) {
+        candidateChunks.push({ chunk, docName: doc.fileName });
+      }
     }
   }
 
   // 3. Compute vector similarities and hybrid scores
   const scoredChunks: ScoredChunk[] = [];
 
-  for (const { chunk, doc } of candidateChunks) {
-    const similarity = cosineSimilarity(queryEmbedding, chunk.embedding);
+  for (const { chunk, docName } of candidateChunks) {
+    const similarity = chunk.embedding && chunk.embedding.length > 0
+      ? cosineSimilarity(queryEmbedding, chunk.embedding)
+      : 0;
     const keywordScore = calculateKeywordScore(query, chunk.content, chunk.heading);
-
-    // Hybrid combination: 70% vector similarity + 30% keyword relevance
     const combinedScore = similarity * 0.70 + keywordScore * 0.30;
 
     if (similarity >= minSimilarity || keywordScore >= 0.20 || combinedScore >= minSimilarity) {
       scoredChunks.push({
         chunk,
-        documentName: doc.fileName,
+        documentName: docName,
         similarity,
         keywordScore,
         combinedScore,
@@ -318,21 +282,51 @@ export async function searchRelevantChunks(
     }
   }
 
-  // 4. Sort descending by combined score and take topK
   scoredChunks.sort((a, b) => b.combinedScore - a.combinedScore);
-  console.log(`[VectorStore] search: found ${candidateChunks.length} candidate chunks across ${runtimeDocuments.size} docs. Scored matches: ${scoredChunks.length}`);
-
   return scoredChunks.slice(0, topK);
 }
 
 /**
  * Retrieves all stored documents belonging to a user (and optionally a deck).
  */
-export function getStoredDocuments(userId: string, deckId?: string | null): StoredDocument[] {
-  ensureStoreLoaded();
-
+export async function getStoredDocuments(userId: string, deckId?: string | null): Promise<StoredDocument[]> {
   if (!userId) return [];
 
+  // Query Supabase documents table
+  try {
+    const admin = createAdminClient();
+    let queryBuilder = admin
+      .from('documents')
+      .select('id, user_id, deck_id, file_name, mime_type, file_size_bytes, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (deckId && isUUID(deckId)) {
+      queryBuilder = queryBuilder.eq('deck_id', deckId);
+    }
+
+    const { data, error } = await queryBuilder;
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const docs: StoredDocument[] = data.map((d: any) => ({
+        id: d.id,
+        userId: d.user_id,
+        deckId: d.deck_id,
+        fileName: d.file_name,
+        fileType: (d.mime_type as any) || 'pdf',
+        characterCount: Number(d.file_size_bytes) || 0,
+        chunkCount: 1,
+        createdAt: d.created_at,
+      }));
+
+      // Cache in memory for quick reuse
+      docs.forEach((doc) => runtimeDocuments.set(doc.id, doc));
+      return docs;
+    }
+  } catch (err: any) {
+    console.warn('[getStoredDocuments] Supabase query notice:', err?.message);
+  }
+
+  // Fallback to runtime memory cache
   const list: StoredDocument[] = [];
   for (const doc of runtimeDocuments.values()) {
     const isUserMatch =
@@ -350,44 +344,58 @@ export function getStoredDocuments(userId: string, deckId?: string | null): Stor
 }
 
 /**
- * Deletes a document and its chunks from vector store.
- * Enforces user ownership check.
+ * Deletes a document and its chunks from vector store and Supabase.
  */
-export function deleteStoredDocument(documentId: string, userId: string): boolean {
-  ensureStoreLoaded();
-
-  const doc = runtimeDocuments.get(documentId);
-  if (!doc) return false;
-
-  // Strict ownership check: Only owner or shared can delete
-  if (doc.userId !== userId && doc.userId !== 'shared' && !(doc.userId === 'default-user' && userId === 'default-user')) {
-    console.warn(`[VectorStore] Unauthorized deletion attempt: User ${userId} tried to delete Doc ${documentId} owned by ${doc.userId}`);
-    return false;
-  }
-
+export async function deleteStoredDocument(documentId: string, userId: string): Promise<boolean> {
   runtimeDocuments.delete(documentId);
   runtimeChunks.delete(documentId);
-  persistStoreToDisk();
 
-  return true;
+  try {
+    const admin = createAdminClient();
+    await admin.from('documents').delete().eq('id', documentId).eq('user_id', userId);
+    return true;
+  } catch (err: any) {
+    console.warn('[deleteStoredDocument] Supabase deletion notice:', err?.message);
+    return false;
+  }
 }
 
 /**
  * Purges all vector store documents and chunks belonging to a user (GDPR / account deletion).
  */
-export function purgeUserRAGData(userId: string): void {
-  ensureStoreLoaded();
-  const docIdsToDelete: string[] = [];
-  for (const [id, doc] of runtimeDocuments.entries()) {
+export async function purgeUserRAGData(userId: string): Promise<void> {
+  for (const [id, doc] of Array.from(runtimeDocuments.entries())) {
     if (doc.userId === userId) {
-      docIdsToDelete.push(id);
+      runtimeDocuments.delete(id);
+      runtimeChunks.delete(id);
     }
   }
-  for (const id of docIdsToDelete) {
-    runtimeDocuments.delete(id);
-    runtimeChunks.delete(id);
+
+  try {
+    const admin = createAdminClient();
+    await admin.from('documents').delete().eq('user_id', userId);
+  } catch (err: any) {
+    console.warn('[purgeUserRAGData] Supabase purge notice:', err?.message);
   }
-  if (docIdsToDelete.length > 0) {
-    persistStoreToDisk();
-  }
+}
+
+/**
+ * Helper to index a document for RAG.
+ */
+export async function indexDocumentForRAG(params: {
+  documentId?: string;
+  userId: string;
+  fileName: string;
+  rawText: string;
+  fileType?: 'pdf' | 'docx' | 'txt' | 'image' | 'notes';
+  deckId?: string | null;
+}): Promise<{ document: StoredDocument; chunks: StoredChunk[] }> {
+  return storeDocumentWithChunks({
+    documentId: params.documentId,
+    userId: params.userId,
+    fileName: params.fileName,
+    rawText: params.rawText,
+    fileType: params.fileType || 'pdf',
+    deckId: params.deckId,
+  });
 }

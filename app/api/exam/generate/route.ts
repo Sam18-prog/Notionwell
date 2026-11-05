@@ -11,8 +11,7 @@ import {
   QuestionType,
   saveExamConfig,
 } from '@/lib/exam';
-import fs from 'fs';
-import path from 'path';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { getAuthenticatedUserSession } from '@/lib/auth-server';
 import { checkRateLimit } from '@/lib/rateLimit';
 
@@ -66,19 +65,33 @@ export async function POST(req: NextRequest) {
     const sourceReferences: string[] = [];
 
     // Check RAG vector store documents
-    const allStoredDocs = getStoredDocuments(userId);
+    const allStoredDocs = await getStoredDocuments(userId);
     const matchedDocs =
       selectedSourceIds.length > 0
         ? allStoredDocs.filter((d) => selectedSourceIds.includes(d.id) || selectedSourceIds.includes(d.fileName))
         : allStoredDocs;
 
-    // Load chunk text from .rag_storage/chunks.json if available
-    const chunksFilePath = path.join(process.cwd(), '.rag_storage', 'chunks.json');
-    let chunksMap: Record<string, any[]> = {};
-    if (fs.existsSync(chunksFilePath)) {
+    // Load chunk text from Supabase document_chunks
+    const chunksMap: Record<string, any[]> = {};
+    if (matchedDocs.length > 0) {
       try {
-        chunksMap = JSON.parse(fs.readFileSync(chunksFilePath, 'utf8'));
-      } catch {}
+        const admin = createAdminClient();
+        const docIds = matchedDocs.map((d) => d.id);
+        const { data: dbChunks } = await admin
+          .from('document_chunks')
+          .select('document_id, heading, content')
+          .in('document_id', docIds)
+          .limit(80);
+
+        if (Array.isArray(dbChunks)) {
+          for (const c of dbChunks) {
+            if (!chunksMap[c.document_id]) chunksMap[c.document_id] = [];
+            chunksMap[c.document_id].push(c);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[exam/generate] Could not load document_chunks from Supabase:', err?.message);
+      }
     }
 
     for (const doc of matchedDocs) {
@@ -311,7 +324,7 @@ ${contextText.slice(0, 18000)}
       questions: finalQuestions,
     };
 
-    saveExamConfig(examConfig);
+    await saveExamConfig(examConfig);
 
     return NextResponse.json({
       success: true,

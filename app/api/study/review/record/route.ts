@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Record review log in analytics persistence & Supabase
-    const reviewLog = recordFlashcardReview(
+    const reviewLog = await recordFlashcardReview(
       userId,
       deckId,
       cardId,
@@ -152,7 +152,7 @@ export async function POST(req: NextRequest) {
     );
 
     // Record streak active date
-    recordActiveStudyDate(userId, 'flashcard', Math.round(chosenDuration / 1000), 1);
+    await recordActiveStudyDate(userId, 'flashcard', Math.round(chosenDuration / 1000), 1);
 
     // Award XP: again = 5, hard = 8, good = 10, easy = 15
     const xpAmount =
@@ -164,7 +164,7 @@ export async function POST(req: NextRequest) {
         ? 15
         : 10;
 
-    const xpResult = awardXP(
+    const xpResult = await awardXP(
       userId,
       'flashcard_review',
       xpAmount,

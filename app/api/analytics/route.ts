@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     const decks = getDecks();
     const subjects = getSubjects();
 
-    const report = buildComprehensiveAnalytics(userId, decks, subjects, daysWindow);
+    const report = await buildComprehensiveAnalytics(userId, decks, subjects, daysWindow);
 
     return NextResponse.json({
       success: true,

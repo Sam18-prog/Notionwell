@@ -52,6 +52,43 @@ export async function GET(req: NextRequest) {
       // Non-blocking: local/mock or unconfigured DB
     }
 
+    // Gather all user data asynchronously from Supabase
+    const [
+      totalXP,
+      streaks,
+      unifiedProfile,
+      indexedDocuments,
+      exams,
+      attempts,
+      goals,
+      achievements,
+      xpTransactions,
+      analyticsSummary,
+      flashcardReviews,
+      quizAttempts,
+      studyPaths,
+      adaptiveProfiles,
+      weakTopics,
+      vivaSessions,
+    ] = await Promise.all([
+      getUserTotalXP(userId),
+      calculateStreaks(userId),
+      getUnifiedLearningProfile(userId),
+      getStoredDocuments(userId),
+      getAllExams(userId),
+      getUserExamAttempts(userId),
+      getLearningGoals(userId),
+      getUserAchievements(userId),
+      getUserXPTransactions(userId),
+      buildComprehensiveAnalytics(userId, getDecks(), getSubjects(), 30),
+      getUserFlashcardReviews(userId),
+      getUserQuizAttempts(userId),
+      getUserStudyPaths(userId),
+      getUserAdaptiveProfiles(userId),
+      detectWeakTopics(userId),
+      getUserVivaHistory(userId),
+    ]);
+
     // Assemble unified export payload
     const exportData = {
       exportMetadata: {
@@ -66,36 +103,36 @@ export async function GET(req: NextRequest) {
         userId: session.id,
         email: session.email || null,
         isDemo: Boolean(session.isDemo),
-        totalXP: getUserTotalXP(userId),
-        streaks: calculateStreaks(userId),
-        unifiedProfile: getUnifiedLearningProfile(userId),
+        totalXP,
+        streaks,
+        unifiedProfile,
       },
       studyDecks: {
         decks: cloudDecks,
         flashcards: cloudCards,
       },
       studyMaterials: {
-        indexedDocuments: getStoredDocuments(userId),
+        indexedDocuments,
       },
       examinations: {
-        exams: getAllExams(userId),
-        attempts: getUserExamAttempts(userId),
+        exams,
+        attempts,
       },
       gamificationAndProgress: {
-        goals: getLearningGoals(userId),
-        achievements: getUserAchievements(userId),
-        xpTransactions: getUserXPTransactions(userId),
-        analyticsSummary: buildComprehensiveAnalytics(userId, getDecks(), getSubjects(), 30),
+        goals,
+        achievements,
+        xpTransactions,
+        analyticsSummary,
       },
       activityLogs: {
-        flashcardReviews: getUserFlashcardReviews(userId),
-        quizAttempts: getUserQuizAttempts(userId),
+        flashcardReviews,
+        quizAttempts,
       },
       learningIntelligence: {
-        studyPaths: getUserStudyPaths(userId),
-        adaptiveProfiles: getUserAdaptiveProfiles(userId),
-        weakTopics: detectWeakTopics(userId),
-        vivaSessions: getUserVivaHistory(userId),
+        studyPaths,
+        adaptiveProfiles,
+        weakTopics,
+        vivaSessions,
       },
     };
 

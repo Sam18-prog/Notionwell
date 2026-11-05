@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     const validatedAmount = Math.max(1, Math.min(maxAllowed, requestedAmount));
 
     const userId = session.id;
-    const result = awardXP(userId, finalSource, validatedAmount, description, activityId.trim());
+    const result = await awardXP(userId, finalSource, validatedAmount, description, activityId.trim());
 
     return NextResponse.json({
       success: true,

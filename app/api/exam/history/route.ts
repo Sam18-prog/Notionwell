@@ -7,6 +7,8 @@ import {
 } from '@/lib/exam';
 import { getAuthenticatedUserSession } from '@/lib/auth-server';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getAuthenticatedUserSession(req);
@@ -29,16 +31,18 @@ export async function GET(req: NextRequest) {
     const attemptId = req.nextUrl.searchParams.get('attemptId');
 
     if (attemptId) {
-      const attempt = getExamAttemptById(attemptId);
+      const attempt = await getExamAttemptById(attemptId);
       if (!attempt || (attempt.userId !== userId && !session.isDemo)) {
         return NextResponse.json({ success: false, error: 'Attempt not found or access denied.' }, { status: 404 });
       }
       return NextResponse.json({ success: true, attempt });
     }
 
-    const attempts = getUserExamAttempts(userId);
-    const stats = calculateExamDashboardStats(userId);
-    const exams = getAllExams(userId);
+    const [attempts, stats, exams] = await Promise.all([
+      getUserExamAttempts(userId),
+      calculateExamDashboardStats(userId),
+      getAllExams(userId),
+    ]);
 
     return NextResponse.json({
       success: true,

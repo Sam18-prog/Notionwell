@@ -1,10 +1,9 @@
 /**
  * Notionwell Phase 6: Core Analytics, Intelligent SM-2, Gamification & Progression Engine
- * High-performance, verified data engine with resilient dual persistence.
+ * Authoritative Supabase PostgreSQL Persistence with Zero Filesystem Dependencies.
+ * Eliminates /var/task/.analytics_storage runtime crashes on Vercel Serverless.
  */
 
-import fs from 'fs';
-import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { Flashcard, Deck, Subject } from '@/lib/app';
@@ -48,10 +47,12 @@ export interface XPTransaction {
 export interface UserLevelInfo {
   currentLevel: number;
   totalXP: number;
-  currentLevelXP: number;
+  currentLevelMinXP: number;
   nextLevelXP: number;
-  progressPercentage: number;
+  levelProgressPercentage: number;
+  progressPercentage?: number;
   xpToNextLevel: number;
+  title: string;
 }
 
 export interface AchievementDefinition {
@@ -59,24 +60,26 @@ export interface AchievementDefinition {
   title: string;
   description: string;
   icon: string;
-  category: 'consistency' | 'flashcards' | 'quizzes' | 'exams' | 'milestones';
+  category: 'milestones' | 'streaks' | 'mastery' | 'time' | 'cards' | 'exams';
   xpReward: number;
   threshold: number;
 }
 
 export interface UserAchievement {
   id: string;
-  userId: string;
-  achievementId: string;
+  userId?: string;
+  achievementId?: string;
   title: string;
   description: string;
   icon: string;
   category: string;
   xpReward: number;
-  threshold: number;
-  currentProgress: number;
   isUnlocked: boolean;
   unlockedAt: string | null;
+  progress: number;
+  currentProgress: number;
+  threshold: number;
+  progressPercentage: number;
 }
 
 export interface LearningGoals {
@@ -91,13 +94,16 @@ export interface LearningGoals {
 }
 
 export interface GoalProgressItem {
-  metric: string;
+  id?: string;
+  metric?: string;
   label: string;
+  current?: number;
+  actual?: number;
   target: number;
-  actual: number;
   unit: string;
   percentage: number;
   isCompleted: boolean;
+  timeframe?: 'daily' | 'weekly';
 }
 
 export interface GoalProgressSummary {
@@ -105,6 +111,12 @@ export interface GoalProgressSummary {
   weekly: GoalProgressItem[];
   dailyCompletionPercentage: number;
   weeklyCompletionPercentage: number;
+  dailyCompletedCount?: number;
+  dailyTotalCount?: number;
+  weeklyCompletedCount?: number;
+  weeklyTotalCount?: number;
+  overallCompletionPercentage?: number;
+  items?: GoalProgressItem[];
 }
 
 export interface StreakInfo {
@@ -131,15 +143,15 @@ export interface FlashcardReviewLog {
 export interface QuizAttemptLog {
   id: string;
   quizId: string;
-  deckId?: string | null;
-  deckName?: string;
+  deckId: string;
+  deckName: string;
   userId: string;
   score: number;
   totalItems: number;
   accuracyPercentage: number;
   durationSeconds: number;
   completedAt: string;
-  topicBreakdown?: Array<{ topic: string; correct: number; total: number }>;
+  topicBreakdown: Array<{ topic: string; correct: number; total: number }>;
 }
 
 export interface ReviewWorkloadItem {
@@ -157,6 +169,7 @@ export interface ComprehensiveAnalyticsReport {
   overview: {
     totalStudySeconds: number;
     totalStudyHoursFormatted: string;
+    totalStudyHours?: string;
     totalFlashcardsReviewed: number;
     totalDecks: number;
     totalCards: number;
@@ -169,6 +182,14 @@ export interface ComprehensiveAnalyticsReport {
     retentionMasteryPercentage: number;
     level: number;
     totalXP: number;
+    totalCardsReviewed?: number;
+    cardsMasteredCount?: number;
+    cardsLearningCount?: number;
+    cardsNewCount?: number;
+    overallAccuracy?: number;
+    levelInfo?: UserLevelInfo;
+    retentionRatePercentage?: number;
+    streakInfo?: StreakInfo;
   };
   learningActivity: {
     dailyActivity: Array<{ date: string; dayLabel: string; studySeconds: number; cardsReviewed: number }>;
@@ -199,159 +220,158 @@ export interface ComprehensiveAnalyticsReport {
     consistencyPercentage: number;
     goalCompletionRate: number;
   };
+  studyTimeTrends?: Array<{
+    date: string;
+    dayLabel: string;
+    seconds: number;
+    minutes: number;
+  }>;
+  retentionCurve?: Array<{
+    daysSinceReview: number;
+    retentionProbability: number;
+    cardCount: number;
+  }>;
+  subjectBreakdown?: Array<{
+    subjectId: string;
+    subjectName: string;
+    totalCards: number;
+    masteredCards: number;
+    accuracyPercentage: number;
+    timeSpentSeconds: number;
+  }>;
+  weakTopics?: Array<{
+    topic: string;
+    accuracyPercentage: number;
+    totalAttempts: number;
+    source: 'quiz' | 'flashcards' | 'exam';
+  }>;
+  dailyPerformance?: {
+    averageReviewSpeedSeconds: number;
+    consistencyPercentage: number;
+    goalCompletionRate: number;
+  };
+}
+
+function isUUID(str?: string | null): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
 }
 
 // ============================================================================
-// 2. ACHIEVEMENT DEFINITIONS (CANONICAL CATALOG)
+// 2. MASTER ACHIEVEMENTS DEFINITIONS (16 BADGES)
 // ============================================================================
 
 export const MASTER_ACHIEVEMENTS: AchievementDefinition[] = [
-  // Consistency
-  {
-    id: 'first_session',
-    title: 'First Step',
-    description: 'Completed your first verified study session',
-    icon: '🚀',
-    category: 'consistency',
-    xpReward: 50,
-    threshold: 1,
-  },
-  {
-    id: 'streak_3',
-    title: '3-Day Momentum',
-    description: 'Maintained a verified 3-day study streak',
-    icon: '🔥',
-    category: 'consistency',
-    xpReward: 75,
-    threshold: 3,
-  },
-  {
-    id: 'streak_7',
-    title: 'Week of Dedication',
-    description: 'Maintained a verified 7-day study streak',
-    icon: '⚡',
-    category: 'consistency',
-    xpReward: 150,
-    threshold: 7,
-  },
-  {
-    id: 'streak_30',
-    title: 'Monthly Champion',
-    description: 'Maintained a disciplined 30-day study streak',
-    icon: '👑',
-    category: 'consistency',
-    xpReward: 500,
-    threshold: 30,
-  },
-
-  // Flashcards
-  {
-    id: 'review_50',
-    title: 'Knowledge Seeker',
-    description: 'Reviewed 50 flashcards using spaced repetition',
-    icon: '📖',
-    category: 'flashcards',
-    xpReward: 50,
-    threshold: 50,
-  },
-  {
-    id: 'review_100',
-    title: 'Century Club',
-    description: 'Reviewed 100 flashcards using spaced repetition',
-    icon: '💯',
-    category: 'flashcards',
-    xpReward: 100,
-    threshold: 100,
-  },
-  {
-    id: 'review_500',
-    title: 'Memory Master',
-    description: 'Reviewed 500 flashcards using spaced repetition',
-    icon: '🧠',
-    category: 'flashcards',
-    xpReward: 250,
-    threshold: 500,
-  },
-  {
-    id: 'review_1000',
-    title: 'Grand Scholar',
-    description: 'Reached 1,000 flashcard reviews milestone',
-    icon: '🎓',
-    category: 'flashcards',
-    xpReward: 500,
-    threshold: 1000,
-  },
-
-  // Quizzes
-  {
-    id: 'first_quiz',
-    title: 'Quiz Novice',
-    description: 'Completed your first practice quiz',
-    icon: '🎯',
-    category: 'quizzes',
-    xpReward: 50,
-    threshold: 1,
-  },
-  {
-    id: 'quiz_perfect',
-    title: 'Perfectionist',
-    description: 'Scored 100% on a full deck quiz',
-    icon: '🌟',
-    category: 'quizzes',
-    xpReward: 100,
-    threshold: 1,
-  },
-  {
-    id: 'quiz_10',
-    title: 'Quiz Veteran',
-    description: 'Successfully completed 10 practice quizzes',
-    icon: '🏅',
-    category: 'quizzes',
-    xpReward: 200,
-    threshold: 10,
-  },
-
-  // Exams
-  {
-    id: 'first_exam',
-    title: 'Test Candidate',
-    description: 'Completed your first AI simulated timed examination',
-    icon: '📝',
-    category: 'exams',
-    xpReward: 75,
-    threshold: 1,
-  },
-  {
-    id: 'exam_distinction',
-    title: 'High Achiever',
-    description: 'Scored Distinction (≥90%) on an AI exam assessment',
-    icon: '🏆',
-    category: 'exams',
-    xpReward: 150,
-    threshold: 1,
-  },
-  {
-    id: 'exam_5',
-    title: 'Exam Master',
-    description: 'Completed 5 AI examination simulations',
-    icon: '🎖️',
-    category: 'exams',
-    xpReward: 300,
-    threshold: 5,
-  },
-
-  // Milestones
   {
     id: 'first_deck',
-    title: 'Deck Architect',
-    description: 'Created your first study deck from lecture notes',
-    icon: '📁',
+    title: 'Pioneer Scholar',
+    description: 'Created your very first study deck',
+    icon: '🌱',
     category: 'milestones',
     xpReward: 50,
     threshold: 1,
   },
   {
-    id: 'mastery_100',
+    id: 'quiz_whiz',
+    title: 'Quiz Virtuoso',
+    description: 'Scored a perfect 100% on any practice quiz',
+    icon: '🎯',
+    category: 'mastery',
+    xpReward: 100,
+    threshold: 1,
+  },
+  {
+    id: 'streak_3',
+    title: 'Habit Builder',
+    description: 'Studied for 3 consecutive days in a row',
+    icon: '🔥',
+    category: 'streaks',
+    xpReward: 75,
+    threshold: 3,
+  },
+  {
+    id: 'streak_7',
+    title: 'Unstoppable Momentum',
+    description: 'Maintained a flawless 7-day study streak',
+    icon: '⚡',
+    category: 'streaks',
+    xpReward: 150,
+    threshold: 7,
+  },
+  {
+    id: 'streak_30',
+    title: 'Iron Discipline',
+    description: 'Achieved an extraordinary 30-day active study streak',
+    icon: '👑',
+    category: 'streaks',
+    xpReward: 500,
+    threshold: 30,
+  },
+  {
+    id: 'time_1h',
+    title: 'Deep Diver',
+    description: 'Invested 1 hour of active study focus',
+    icon: '⏱️',
+    category: 'time',
+    xpReward: 75,
+    threshold: 3600,
+  },
+  {
+    id: 'time_5h',
+    title: 'Marathon Scholar',
+    description: 'Dedicated 5 hours of total learning time',
+    icon: '🏆',
+    category: 'time',
+    xpReward: 200,
+    threshold: 18000,
+  },
+  {
+    id: 'cards_50',
+    title: 'Flash Focus',
+    description: 'Reviewed 50 flashcards across all decks',
+    icon: '🃏',
+    category: 'cards',
+    xpReward: 75,
+    threshold: 50,
+  },
+  {
+    id: 'cards_200',
+    title: 'Memory Master',
+    description: 'Reviewed 200 flashcards using spaced repetition',
+    icon: '🧠',
+    category: 'cards',
+    xpReward: 200,
+    threshold: 200,
+  },
+  {
+    id: 'exam_rookie',
+    title: 'Trial by Fire',
+    description: 'Completed your first full AI simulated exam',
+    icon: '📝',
+    category: 'exams',
+    xpReward: 100,
+    threshold: 1,
+  },
+  {
+    id: 'exam_distinction',
+    title: 'Academic Distinction',
+    description: 'Scored 90%+ with Distinction on a simulated exam',
+    icon: '🎖️',
+    category: 'exams',
+    xpReward: 250,
+    threshold: 1,
+  },
+  {
+    id: 'polymath',
+    title: 'Renaissance Learner',
+    description: 'Studied across 3 or more distinct subject domains',
+    icon: '🌐',
+    category: 'mastery',
+    xpReward: 150,
+    threshold: 3,
+  },
+  {
+    id: 'retention_centurion',
     title: 'Centurion of Retention',
     description: 'Mastered 100 flashcards with long-term SM-2 retention',
     icon: '💎',
@@ -359,217 +379,131 @@ export const MASTER_ACHIEVEMENTS: AchievementDefinition[] = [
     xpReward: 250,
     threshold: 100,
   },
+  {
+    id: 'weakness_slayer',
+    title: 'Weakness Slayer',
+    description: 'Remediated 5 detected weak topics to full accuracy',
+    icon: '⚔️',
+    category: 'mastery',
+    xpReward: 150,
+    threshold: 5,
+  },
+  {
+    id: 'viva_scholar',
+    title: 'Articulate Scholar',
+    description: 'Completed an AI Viva Voce oral examination session',
+    icon: '🎙️',
+    category: 'mastery',
+    xpReward: 150,
+    threshold: 1,
+  },
+  {
+    id: 'knowledge_architect',
+    title: 'Knowledge Architect',
+    description: 'Discovered cross-document knowledge connections',
+    icon: '🗺️',
+    category: 'mastery',
+    xpReward: 150,
+    threshold: 1,
+  },
 ];
 
 // ============================================================================
-// 3. PERSISTENT STORAGE MANAGEMENT (.analytics_storage/)
+// 3. IN-MEMORY DEMO FALLBACK CACHE (For unauthenticated demo guests only)
 // ============================================================================
 
-const STORAGE_DIR = path.join(process.cwd(), '.analytics_storage');
-
-function ensureAnalyticsDir() {
-  if (!fs.existsSync(STORAGE_DIR)) {
-    fs.mkdirSync(STORAGE_DIR, { recursive: true });
-  }
-}
-
-function readJSON<T>(fileName: string, fallback: T): T {
-  ensureAnalyticsDir();
-  const filePath = path.join(STORAGE_DIR, fileName);
-  if (!fs.existsSync(filePath)) return fallback;
-  try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJSON<T>(fileName: string, data: T): void {
-  ensureAnalyticsDir();
-  const filePath = path.join(STORAGE_DIR, fileName);
-  try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-  } catch (err) {
-    console.error(`Failed to write ${fileName}:`, err);
-  }
-}
-
-// In-memory caches backed by disk JSON
-let memoryXP: Map<string, XPTransaction> = new Map();
-let memoryGoals: Map<string, LearningGoals> = new Map();
-let memoryReviews: FlashcardReviewLog[] = [];
-let memoryQuizAttempts: QuizAttemptLog[] = [];
-let memoryUnlockedAchievements: Map<string, Set<string>> = new Map(); // userId -> Set of achievementIds
-let memoryStreakDates: Map<string, Set<string>> = new Map(); // userId -> Set of YYYY-MM-DD
-let isStorageLoaded = false;
-
-function loadStorage() {
-  if (isStorageLoaded) return;
-  ensureAnalyticsDir();
-
-  const xpList = readJSON<XPTransaction[]>('xp.json', []);
-  memoryXP = new Map(xpList.map((x) => [`${x.userId}:${x.activityId}`, x]));
-
-  const goalsList = readJSON<LearningGoals[]>('goals.json', []);
-  memoryGoals = new Map(goalsList.map((g) => [g.userId, g]));
-
-  memoryReviews = readJSON<FlashcardReviewLog[]>('reviews.json', []);
-  memoryQuizAttempts = readJSON<QuizAttemptLog[]>('quiz_attempts.json', []);
-
-  const rawAch = readJSON<Record<string, string[]>>('user_achievements.json', {});
-  memoryUnlockedAchievements = new Map();
-  for (const [uid, achIds] of Object.entries(rawAch)) {
-    memoryUnlockedAchievements.set(uid, new Set(achIds));
-  }
-
-  const rawStreaks = readJSON<Record<string, string[]>>('streaks.json', {});
-  memoryStreakDates = new Map();
-  for (const [uid, dates] of Object.entries(rawStreaks)) {
-    memoryStreakDates.set(uid, new Set(dates));
-  }
-
-  isStorageLoaded = true;
-}
-
-function persistStorage() {
-  ensureAnalyticsDir();
-  writeJSON('xp.json', Array.from(memoryXP.values()));
-  writeJSON('goals.json', Array.from(memoryGoals.values()));
-  writeJSON('reviews.json', memoryReviews);
-  writeJSON('quiz_attempts.json', memoryQuizAttempts);
-
-  const achObj: Record<string, string[]> = {};
-  for (const [uid, set] of memoryUnlockedAchievements.entries()) {
-    achObj[uid] = Array.from(set);
-  }
-  writeJSON('user_achievements.json', achObj);
-
-  const streakObj: Record<string, string[]> = {};
-  for (const [uid, set] of memoryStreakDates.entries()) {
-    streakObj[uid] = Array.from(set);
-  }
-  writeJSON('streaks.json', streakObj);
-}
+const demoXPMap = new Map<string, XPTransaction>();
+const demoGoalsMap = new Map<string, LearningGoals>();
+let demoReviews: FlashcardReviewLog[] = [];
+let demoQuizAttempts: QuizAttemptLog[] = [];
+const demoAchievements = new Set<string>();
+const demoStreakDates = new Set<string>();
 
 // ============================================================================
 // 4. INTELLIGENT SM-2 SPACED REPETITION ENGINE
 // ============================================================================
 
-/**
- * SuperMemo SM-2 Spaced Repetition Algorithm
- * Maps user responses:
- * - 'again' (q=1): Complete memory lapse. Reset repetition count to 0, interval to 1 day.
- * - 'hard'  (q=3): Difficult recall. Interval multiplied by 1.2, EF reduced by 0.15.
- * - 'good'  (q=4): Standard successful recall. Normal SM-2 interval progression (1 -> 6 -> interval * EF).
- * - 'easy'  (q=5): Effortless recall. Interval multiplied by EF * 1.3, EF increased by 0.15.
- * - 'medium': Backward compatible mapping to 'good'.
- */
 export function calculateSM2(
-  currentCard: Flashcard,
-  response: SM2Rating
+  card: Flashcard,
+  rating: SM2Rating
 ): SM2Result {
-  let ef = (currentCard as any).easinessFactor || 2.5;
-  let interval = currentCard.intervalDays || 0;
-  let repCount = (currentCard as any).repetitionCount || 0;
-  let timesIncorrect = currentCard.timesIncorrect || 0;
+  const ratingMap: Record<SM2Rating, number> = {
+    again: 1,
+    hard: 3,
+    medium: 4,
+    good: 4,
+    easy: 5,
+  };
 
-  let q: number;
-  switch (response) {
-    case 'again':
-      q = 1;
-      break;
-    case 'hard':
-      q = 3;
-      break;
-    case 'good':
-    case 'medium':
-      q = 4;
-      break;
-    case 'easy':
-      q = 5;
-      break;
-    default:
-      q = 4;
-  }
+  const q = ratingMap[rating] || 4;
+  let currentEF = (card as any).easinessFactor || 2.5;
+  let currentInterval = card.intervalDays || 0;
+  let currentRepetition = (card as any).repetitionCount || 0;
+
+  // Standard SuperMemo SM-2 formula:
+  // EF' = EF + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))
+  let newEF = currentEF + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
+  if (newEF < 1.3) newEF = 1.3;
+  if (newEF > 2.8) newEF = 2.8;
+  newEF = Math.round(newEF * 100) / 100;
+
+  let newInterval = 1;
+  let newRepetition = currentRepetition;
 
   if (q < 3) {
-    // Memory Lapse (Again)
-    repCount = 0;
-    interval = 1;
-    timesIncorrect += 1;
-    ef = Math.max(1.3, ef - 0.2);
+    // Lapse
+    newRepetition = 0;
+    newInterval = 1;
   } else {
-    // Successful recall (Hard, Good, Easy)
-    if (q === 3) {
-      // Hard: smaller interval bump
-      interval = Math.max(1, Math.round((interval || 1) * 1.2));
-      ef = Math.max(1.3, ef - 0.15);
-    } else if (q === 4) {
-      // Good: standard SM-2 intervals
-      if (repCount === 0) {
-        interval = 1;
-      } else if (repCount === 1) {
-        interval = 6;
-      } else {
-        interval = Math.max(1, Math.round(interval * ef));
-      }
-      repCount += 1;
-      ef = ef + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
-      ef = Math.max(1.3, Math.min(3.0, ef));
+    // Successful recall
+    if (currentRepetition === 0) {
+      newInterval = 1;
+    } else if (currentRepetition === 1) {
+      newInterval = 6;
     } else {
-      // Easy: accelerated interval jump
-      if (repCount === 0) {
-        interval = 3;
-      } else if (repCount === 1) {
-        interval = 8;
+      if (rating === 'hard') {
+        newInterval = Math.max(1, Math.round(currentInterval * 1.2));
+      } else if (rating === 'easy') {
+        newInterval = Math.max(1, Math.round(currentInterval * newEF * 1.3));
       } else {
-        interval = Math.max(1, Math.round(interval * ef * 1.3));
+        newInterval = Math.max(1, Math.round(currentInterval * newEF));
       }
-      repCount += 1;
-      ef = Math.min(3.0, ef + 0.15);
     }
+    newRepetition += 1;
   }
 
-  // Calculate Next Review Date
-  const nextDate = new Date();
-  nextDate.setDate(nextDate.getDate() + interval);
-  const year = nextDate.getFullYear();
-  const month = String(nextDate.getMonth() + 1).padStart(2, '0');
-  const day = String(nextDate.getDate()).padStart(2, '0');
-  const nextReviewDate = `${year}-${month}-${day}`;
-
-  // Mastery progression: 3+ successful repetitions marks mastery
+  // Determine mastery level
   let masteryLevel: 'new' | 'learning' | 'mastered' = 'learning';
-  if (repCount >= 3) {
+  if (newRepetition >= 4 && newInterval >= 21) {
     masteryLevel = 'mastered';
-  } else if (repCount === 0 && (currentCard.timesReviewed || 0) === 0) {
+  } else if (newRepetition === 0 && q < 3) {
     masteryLevel = 'new';
+  } else {
+    masteryLevel = 'learning';
   }
+
+  const reviewDate = new Date();
+  reviewDate.setDate(reviewDate.getDate() + newInterval);
+  const nextReviewDate = getLocalDateString(reviewDate);
 
   return {
-    easinessFactor: Math.round(ef * 100) / 100,
-    intervalDays: interval,
-    repetitionCount: repCount,
+    easinessFactor: newEF,
+    intervalDays: newInterval,
+    repetitionCount: newRepetition,
     nextReviewDate,
     masteryLevel,
     ratingValue: q,
   };
 }
 
-/**
- * Records an individual flashcard review event into persistent storage and Supabase.
- */
-export function recordFlashcardReview(
+export async function recordFlashcardReview(
   userId: string,
   deckId: string,
   flashcardId: string,
   response: SM2Rating,
   sm2Result: SM2Result,
   durationMs: number = 0
-): FlashcardReviewLog {
-  loadStorage();
-
+): Promise<FlashcardReviewLog> {
   const log: FlashcardReviewLog = {
     id: uuidv4(),
     flashcardId,
@@ -583,240 +517,369 @@ export function recordFlashcardReview(
     reviewedAt: new Date().toISOString(),
   };
 
-  memoryReviews.push(log);
-  persistStorage();
-
-  // Async sync to Supabase
-  try {
-    const admin = createAdminClient();
-    (async () => {
-      try {
-        const { error: sbErr } = await admin.from('flashcard_reviews').insert({
-          id: log.id,
-          flashcard_id: flashcardId,
-          user_id: userId,
-          rating: sm2Result.ratingValue,
-          response_type: response === 'medium' ? 'good' : response,
-          scheduled_days: sm2Result.intervalDays,
-          easiness_factor: sm2Result.easinessFactor,
-          review_duration_ms: durationMs,
-          reviewed_at: log.reviewedAt,
-        });
-        if (sbErr) {
-          console.warn(`[Supabase flashcard_reviews sync]: ${sbErr.code} - ${sbErr.message}`);
-        }
-      } catch (err: any) {
-        console.warn(`[Supabase flashcard_reviews exception]: ${err?.message}`);
-      }
-    })();
-  } catch (clientErr: any) {
-    console.warn(`[Supabase client error]: ${clientErr?.message}`);
+  if (userId === 'demo-guest-user') {
+    demoReviews.push(log);
+    await recordActiveStudyDate(userId, 'flashcards', Math.max(10, Math.round(durationMs / 1000)), 1);
+    return log;
   }
 
-  // Automatically record active streak for today
-  recordActiveStudyDate(userId, 'flashcards', Math.max(10, Math.round(durationMs / 1000)), 1);
+  try {
+    const admin = createAdminClient();
+    await admin.from('flashcard_reviews').insert({
+      id: log.id,
+      flashcard_id: isUUID(flashcardId) ? flashcardId : null,
+      user_id: userId,
+      rating: sm2Result.ratingValue,
+      response_type: response === 'medium' ? 'good' : response,
+      scheduled_days: sm2Result.intervalDays,
+      easiness_factor: sm2Result.easinessFactor,
+      review_duration_ms: durationMs,
+      reviewed_at: log.reviewedAt,
+    });
 
+    // If card exists in Supabase flashcards table, update its SM-2 state
+    if (isUUID(flashcardId)) {
+      await admin.from('flashcards').update({
+        interval_days: sm2Result.intervalDays,
+        easiness_factor: sm2Result.easinessFactor,
+        repetition_count: sm2Result.repetitionCount,
+        next_review_date: sm2Result.nextReviewDate,
+        mastery_level: sm2Result.masteryLevel,
+        last_reviewed_at: log.reviewedAt,
+      }).eq('id', flashcardId).eq('user_id', userId);
+    }
+  } catch (err: any) {
+    console.warn('[recordFlashcardReview] Supabase insert notice:', err?.message);
+  }
+
+  await recordActiveStudyDate(userId, 'flashcards', Math.max(10, Math.round(durationMs / 1000)), 1);
   return log;
 }
 
-export function getUserFlashcardReviews(userId: string): FlashcardReviewLog[] {
-  loadStorage();
-  return memoryReviews.filter((r) => r.userId === userId || r.userId === 'shared');
+export async function getUserFlashcardReviews(userId: string): Promise<FlashcardReviewLog[]> {
+  if (userId === 'demo-guest-user') {
+    return demoReviews;
+  }
+
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from('flashcard_reviews')
+      .select('*')
+      .eq('user_id', userId)
+      .order('reviewed_at', { ascending: false });
+
+    if (!error && Array.isArray(data)) {
+      return data.map((r) => ({
+        id: r.id,
+        flashcardId: r.flashcard_id || '',
+        deckId: '',
+        userId: r.user_id,
+        ratingValue: r.rating,
+        responseType: r.response_type,
+        scheduledDays: r.scheduled_days,
+        easinessFactor: Number(r.easiness_factor),
+        durationMs: r.review_duration_ms || 0,
+        reviewedAt: r.reviewed_at,
+      }));
+    }
+  } catch (err: any) {
+    console.warn('[getUserFlashcardReviews] Supabase query notice:', err?.message);
+  }
+
+  return [];
 }
 
 // ============================================================================
 // 5. GAMIFICATION & XP PROGRESSION SYSTEM
 // ============================================================================
 
-/**
- * Progression Formula:
- * Level L = floor(sqrt(totalXP / 50)) + 1
- * Total XP required for level L = 50 * (L - 1)^2
- * XP required for next level L + 1 = 50 * L^2
- */
 export function calculateLevelFromXP(totalXP: number): UserLevelInfo {
-  const safeXP = Math.max(0, totalXP);
-  const currentLevel = Math.floor(Math.sqrt(safeXP / 50)) + 1;
-  const currentLevelBaseXP = 50 * Math.pow(currentLevel - 1, 2);
-  const nextLevelBaseXP = 50 * Math.pow(currentLevel, 2);
-  const xpInCurrentLevel = safeXP - currentLevelBaseXP;
-  const xpNeededForLevel = nextLevelBaseXP - currentLevelBaseXP;
-  const progressPercentage = Math.min(
-    100,
-    Math.max(0, Math.round((xpInCurrentLevel / xpNeededForLevel) * 100))
-  );
+  const safeXP = Math.max(0, totalXP || 0);
+  const currentLevel = Math.max(1, Math.floor(Math.sqrt(safeXP / 50)) + 1);
+
+  const currentLevelMinXP = 50 * Math.pow(currentLevel - 1, 2);
+  const nextLevelXP = 50 * Math.pow(currentLevel, 2);
+  const xpSpan = nextLevelXP - currentLevelMinXP;
+  const xpEarnedInLevel = safeXP - currentLevelMinXP;
+
+  const levelProgressPercentage =
+    xpSpan > 0 ? Math.min(100, Math.max(0, Math.round((xpEarnedInLevel / xpSpan) * 100))) : 0;
+
+  const titles = [
+    'Novice Explorer',
+    'Curious Apprentice',
+    'Diligent Scholar',
+    'Adept Thinker',
+    'Master Mind',
+    'Knowledge Alchemist',
+    'Sage Philosopher',
+    'Archon of Wisdom',
+  ];
+  const titleIndex = Math.min(titles.length - 1, Math.floor((currentLevel - 1) / 3));
 
   return {
     currentLevel,
     totalXP: safeXP,
-    currentLevelXP: currentLevelBaseXP,
-    nextLevelXP: nextLevelBaseXP,
-    progressPercentage,
-    xpToNextLevel: nextLevelBaseXP - safeXP,
+    currentLevelMinXP,
+    nextLevelXP,
+    levelProgressPercentage,
+    progressPercentage: levelProgressPercentage,
+    xpToNextLevel: Math.max(0, nextLevelXP - safeXP),
+    title: titles[titleIndex],
   };
 }
 
-/**
- * Atomically awards XP to a user with an idempotency activityId.
- * If activityId has already been awarded, returns awarded: false to prevent duplicate rewards.
- */
-export function awardXP(
+export async function awardXP(
   userId: string,
   source: XPSource,
   amount: number,
   description: string,
   activityId: string
-): {
+): Promise<{
   awarded: boolean;
   transaction: XPTransaction | null;
   levelInfo: UserLevelInfo;
   leveledUp: boolean;
   previousLevel: number;
-} {
-  loadStorage();
-
+}> {
   const user = userId || 'default-user';
-  const lookupKey = `${user}:${activityId}`;
-  const existing = memoryXP.get(lookupKey);
 
-  // Calculate current user XP
-  let currentTotalXP = 0;
-  for (const tx of memoryXP.values()) {
-    if (tx.userId === user) {
-      currentTotalXP += tx.amount;
+  if (user === 'demo-guest-user') {
+    const key = `${user}:${activityId}`;
+    let currentXP = 0;
+    demoXPMap.forEach((tx) => (currentXP += tx.amount));
+    const prevLevel = calculateLevelFromXP(currentXP);
+
+    if (demoXPMap.has(key)) {
+      return {
+        awarded: false,
+        transaction: demoXPMap.get(key)!,
+        levelInfo: prevLevel,
+        leveledUp: false,
+        previousLevel: prevLevel.currentLevel,
+      };
     }
-  }
 
-  const prevLevelInfo = calculateLevelFromXP(currentTotalXP);
-
-  if (existing) {
+    const tx: XPTransaction = {
+      id: uuidv4(),
+      userId: user,
+      amount,
+      source,
+      description,
+      activityId,
+      createdAt: new Date().toISOString(),
+    };
+    demoXPMap.set(key, tx);
+    const newTotal = currentXP + amount;
+    const newLevel = calculateLevelFromXP(newTotal);
     return {
-      awarded: false,
-      transaction: existing,
-      levelInfo: prevLevelInfo,
-      leveledUp: false,
-      previousLevel: prevLevelInfo.currentLevel,
+      awarded: true,
+      transaction: tx,
+      levelInfo: newLevel,
+      leveledUp: newLevel.currentLevel > prevLevel.currentLevel,
+      previousLevel: prevLevel.currentLevel,
     };
   }
 
-  const transaction: XPTransaction = {
-    id: uuidv4(),
-    userId: user,
-    amount,
-    source,
-    description,
-    activityId,
-    createdAt: new Date().toISOString(),
-  };
-
-  memoryXP.set(lookupKey, transaction);
-  persistStorage();
-
-  const newTotalXP = currentTotalXP + amount;
-  const newLevelInfo = calculateLevelFromXP(newTotalXP);
-  const leveledUp = newLevelInfo.currentLevel > prevLevelInfo.currentLevel;
-
-  // Authoritative sync to Supabase with explicit diagnostics
   try {
     const admin = createAdminClient();
-    (async () => {
-      try {
-        const { error: sbErr } = await admin.from('xp_transactions').insert({
-          id: transaction.id,
-          user_id: user,
-          amount: transaction.amount,
-          source: transaction.source,
-          description: transaction.description,
-          activity_id: transaction.activityId,
-          created_at: transaction.createdAt,
-        });
-        if (sbErr) {
-          console.warn(`[Supabase xp_transactions sync]: ${sbErr.code} - ${sbErr.message}`);
-        }
-      } catch (err: any) {
-        console.warn(`[Supabase xp_transactions exception]: ${err?.message}`);
-      }
-    })();
-  } catch (adminErr: any) {
-    console.warn(`[Supabase admin client error]: ${adminErr?.message}`);
-  }
 
-  return {
-    awarded: true,
-    transaction,
-    levelInfo: newLevelInfo,
-    leveledUp,
-    previousLevel: prevLevelInfo.currentLevel,
-  };
+    // 1. Check idempotency: avoid duplicate rewards
+    const { data: existing } = await admin
+      .from('xp_transactions')
+      .select('*')
+      .eq('user_id', user)
+      .eq('activity_id', activityId)
+      .maybeSingle();
+
+    if (existing) {
+      const totalXP = await getUserTotalXP(user);
+      const levelInfo = calculateLevelFromXP(totalXP);
+      return {
+        awarded: false,
+        transaction: {
+          id: existing.id,
+          userId: existing.user_id,
+          amount: existing.amount,
+          source: existing.source as XPSource,
+          description: existing.description,
+          activityId: existing.activity_id,
+          createdAt: existing.created_at,
+        },
+        levelInfo,
+        leveledUp: false,
+        previousLevel: levelInfo.currentLevel,
+      };
+    }
+
+    const currentTotalXP = await getUserTotalXP(user);
+    const prevLevelInfo = calculateLevelFromXP(currentTotalXP);
+
+    const transaction: XPTransaction = {
+      id: uuidv4(),
+      userId: user,
+      amount,
+      source,
+      description,
+      activityId,
+      createdAt: new Date().toISOString(),
+    };
+
+    // 2. Insert transaction
+    const { error: insertErr } = await admin.from('xp_transactions').insert({
+      id: transaction.id,
+      user_id: user,
+      amount: transaction.amount,
+      source: transaction.source,
+      description: transaction.description,
+      activity_id: transaction.activityId,
+      created_at: transaction.createdAt,
+    });
+
+    if (insertErr) {
+      console.warn('[awardXP] xp_transactions insert notice:', insertErr.message);
+    }
+
+    // 3. Update total XP in user profile
+    const newTotalXP = currentTotalXP + amount;
+    const newLevelInfo = calculateLevelFromXP(newTotalXP);
+    const leveledUp = newLevelInfo.currentLevel > prevLevelInfo.currentLevel;
+
+    await admin.from('profiles').update({
+      total_xp: newTotalXP,
+      current_level: newLevelInfo.currentLevel,
+      updated_at: new Date().toISOString(),
+    }).eq('id', user);
+
+    return {
+      awarded: true,
+      transaction,
+      levelInfo: newLevelInfo,
+      leveledUp,
+      previousLevel: prevLevelInfo.currentLevel,
+    };
+  } catch (err: any) {
+    console.error('[awardXP Error]:', err?.message);
+    const fallbackLevel = calculateLevelFromXP(0);
+    return {
+      awarded: false,
+      transaction: null,
+      levelInfo: fallbackLevel,
+      leveledUp: false,
+      previousLevel: 1,
+    };
+  }
 }
 
-export function getUserXPTransactions(userId: string): XPTransaction[] {
-  loadStorage();
+export async function getUserXPTransactions(userId: string): Promise<XPTransaction[]> {
   const user = userId || 'default-user';
-  const list: XPTransaction[] = [];
-  for (const tx of memoryXP.values()) {
-    if (tx.userId === user) list.push(tx);
+
+  if (user === 'demo-guest-user') {
+    return Array.from(demoXPMap.values()).reverse();
   }
-  return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from('xp_transactions')
+      .select('*')
+      .eq('user_id', user)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (!error && Array.isArray(data)) {
+      return data.map((row) => ({
+        id: row.id,
+        userId: row.user_id,
+        amount: row.amount,
+        source: row.source as XPSource,
+        description: row.description,
+        activityId: row.activity_id,
+        createdAt: row.created_at,
+      }));
+    }
+  } catch (err: any) {
+    console.warn('[getUserXPTransactions] Query notice:', err?.message);
+  }
+
+  return [];
 }
 
-export function getUserTotalXP(userId: string): number {
-  loadStorage();
+export async function getUserTotalXP(userId: string): Promise<number> {
   const user = userId || 'default-user';
-  let sum = 0;
-  for (const tx of memoryXP.values()) {
-    if (tx.userId === user) sum += tx.amount;
+
+  if (user === 'demo-guest-user') {
+    let sum = 0;
+    demoXPMap.forEach((tx) => (sum += tx.amount));
+    return sum;
   }
-  return sum;
+
+  try {
+    const admin = createAdminClient();
+    // 1. Try reading profile cached total_xp
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('total_xp')
+      .eq('id', user)
+      .maybeSingle();
+
+    if (profile && typeof profile.total_xp === 'number') {
+      return profile.total_xp;
+    }
+
+    // 2. Sum directly from xp_transactions
+    const { data: txs } = await admin
+      .from('xp_transactions')
+      .select('amount')
+      .eq('user_id', user);
+
+    if (Array.isArray(txs)) {
+      return txs.reduce((sum, tx) => sum + (tx.amount || 0), 0);
+    }
+  } catch (err: any) {
+    console.warn('[getUserTotalXP] Query notice:', err?.message);
+  }
+
+  return 0;
 }
 
 // ============================================================================
 // 6. STREAK TRACKING & ACTIVITY CALENDAR
 // ============================================================================
 
-export function recordActiveStudyDate(
+export async function recordActiveStudyDate(
   userId: string,
   activityType: string = 'study',
   durationSeconds: number = 0,
   cardsReviewed: number = 0
-): void {
-  loadStorage();
+): Promise<void> {
   const user = userId || 'default-user';
-
   const todayStr = getLocalDateString();
-  let datesSet = memoryStreakDates.get(user);
-  if (!datesSet) {
-    datesSet = new Set();
-    memoryStreakDates.set(user, datesSet);
+
+  if (user === 'demo-guest-user') {
+    demoStreakDates.add(todayStr);
+    return;
   }
 
-  datesSet.add(todayStr);
-  persistStorage();
-
-  // Async sync to Supabase
   try {
     const admin = createAdminClient();
-    (async () => {
-      try {
-        const { error: sbErr } = await admin.from('streak_history').upsert(
-          {
-            user_id: user,
-            active_date: todayStr,
-            activity_type: activityType,
-            duration_seconds: durationSeconds,
-            cards_reviewed: cardsReviewed,
-          },
-          { onConflict: 'user_id,active_date' }
-        );
-        if (sbErr) {
-          console.warn(`[Supabase streak_history sync]: ${sbErr.code} - ${sbErr.message}`);
-        }
-      } catch (err: any) {
-        console.warn(`[Supabase streak_history exception]: ${err?.message}`);
-      }
-    })();
-  } catch (clientErr: any) {
-    console.warn(`[Supabase client error]: ${clientErr?.message}`);
+    await admin.from('streak_history').upsert({
+      user_id: user,
+      active_date: todayStr,
+      activity_type: activityType,
+      duration_seconds: durationSeconds,
+      cards_reviewed: cardsReviewed,
+    }, { onConflict: 'user_id, active_date' });
+
+    // Update streak_days in profiles
+    const streaks = await calculateStreaks(user);
+    await admin.from('profiles').update({
+      streak_days: streaks.currentStreak,
+      updated_at: new Date().toISOString(),
+    }).eq('id', user);
+  } catch (err: any) {
+    console.warn('[recordActiveStudyDate] Supabase streak upsert notice:', err?.message);
   }
 }
 
@@ -827,11 +890,28 @@ export function getLocalDateString(date: Date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
-export function calculateStreaks(userId: string): StreakInfo {
-  loadStorage();
+export async function calculateStreaks(userId: string): Promise<StreakInfo> {
   const user = userId || 'default-user';
-  const datesSet = memoryStreakDates.get(user) || new Set();
-  const sortedDates = Array.from(datesSet).sort();
+  let sortedDates: string[] = [];
+
+  if (user === 'demo-guest-user') {
+    sortedDates = Array.from(demoStreakDates).sort();
+  } else {
+    try {
+      const admin = createAdminClient();
+      const { data, error } = await admin
+        .from('streak_history')
+        .select('active_date')
+        .eq('user_id', user)
+        .order('active_date', { ascending: true });
+
+      if (!error && Array.isArray(data)) {
+        sortedDates = data.map((r) => r.active_date).filter(Boolean).sort();
+      }
+    } catch (err: any) {
+      console.warn('[calculateStreaks] Supabase streak query notice:', err?.message);
+    }
+  }
 
   if (sortedDates.length === 0) {
     return {
@@ -844,14 +924,13 @@ export function calculateStreaks(userId: string): StreakInfo {
   }
 
   const todayStr = getLocalDateString();
+  const datesSet = new Set(sortedDates);
   const todayCompleted = datesSet.has(todayStr);
 
   // Compute Current Streak
   let currentStreak = 0;
   let checkDate = new Date();
 
-  // If today is completed, start checking backwards from today.
-  // Otherwise start checking backwards from yesterday.
   if (!todayCompleted) {
     checkDate.setDate(checkDate.getDate() - 1);
   }
@@ -903,7 +982,7 @@ export function calculateStreaks(userId: string): StreakInfo {
 // 7. ACHIEVEMENTS & BADGES ENGINE
 // ============================================================================
 
-export function getUserAchievements(
+export async function getUserAchievements(
   userId: string,
   stats?: {
     totalSessions?: number;
@@ -916,111 +995,94 @@ export function getUserAchievements(
     decksCount?: number;
     masteredCardsCount?: number;
     hasSubjectCompleted?: boolean;
+    hoursStudied?: number;
+    weakTopicsFixed?: number;
+    vivaSessionsCompleted?: number;
+    connectionsCount?: number;
   }
-): UserAchievement[] {
-  loadStorage();
+): Promise<UserAchievement[]> {
   const user = userId || 'default-user';
-  let unlockedSet = memoryUnlockedAchievements.get(user);
-  if (!unlockedSet) {
-    unlockedSet = new Set();
-    memoryUnlockedAchievements.set(user, unlockedSet);
+  const unlockedIds = new Set<string>();
+
+  if (user === 'demo-guest-user') {
+    demoAchievements.forEach((id) => unlockedIds.add(id));
+  } else {
+    try {
+      const admin = createAdminClient();
+      const { data, error } = await admin
+        .from('user_achievements')
+        .select('achievement_id')
+        .eq('user_id', user);
+
+      if (!error && Array.isArray(data)) {
+        data.forEach((r) => unlockedIds.add(r.achievement_id));
+      }
+    } catch (err: any) {
+      console.warn('[getUserAchievements] Query notice:', err?.message);
+    }
   }
 
-  const s = {
-    totalSessions: stats?.totalSessions ?? 0,
-    streakDays: stats?.streakDays ?? 0,
-    cardsReviewed: stats?.cardsReviewed ?? 0,
-    quizzesCompleted: stats?.quizzesCompleted ?? 0,
-    hasPerfectQuiz: stats?.hasPerfectQuiz ?? false,
-    examsCompleted: stats?.examsCompleted ?? 0,
-    hasExamDistinction: stats?.hasExamDistinction ?? false,
-    decksCount: stats?.decksCount ?? 0,
-    masteredCardsCount: stats?.masteredCardsCount ?? 0,
-    hasSubjectCompleted: stats?.hasSubjectCompleted ?? false,
-  };
+  const s = stats || {};
+  const newlyUnlocked: string[] = [];
 
-  const results: UserAchievement[] = [];
-
-  for (const def of MASTER_ACHIEVEMENTS) {
-    let currentProgress = 0;
+  const results: UserAchievement[] = MASTER_ACHIEVEMENTS.map((def) => {
+    let progress = 0;
 
     switch (def.id) {
-      case 'first_session':
-        currentProgress = s.totalSessions;
+      case 'first_deck':
+        progress = s.decksCount || 0;
+        break;
+      case 'quiz_whiz':
+        progress = s.hasPerfectQuiz ? 1 : 0;
         break;
       case 'streak_3':
       case 'streak_7':
       case 'streak_30':
-        currentProgress = s.streakDays;
+        progress = s.streakDays || 0;
         break;
-      case 'review_50':
-      case 'review_100':
-      case 'review_500':
-      case 'review_1000':
-        currentProgress = s.cardsReviewed;
+      case 'time_1h':
+      case 'time_5h':
+        progress = Math.round((s.hoursStudied || 0) * 3600);
         break;
-      case 'first_quiz':
-      case 'quiz_10':
-        currentProgress = s.quizzesCompleted;
+      case 'cards_50':
+      case 'cards_200':
+        progress = s.cardsReviewed || 0;
         break;
-      case 'quiz_perfect':
-        currentProgress = s.hasPerfectQuiz ? 1 : 0;
-        break;
-      case 'first_exam':
-      case 'exam_5':
-        currentProgress = s.examsCompleted;
+      case 'exam_rookie':
+        progress = s.examsCompleted || 0;
         break;
       case 'exam_distinction':
-        currentProgress = s.hasExamDistinction ? 1 : 0;
+        progress = s.hasExamDistinction ? 1 : 0;
         break;
-      case 'first_deck':
-        currentProgress = s.decksCount;
+      case 'polymath':
+        progress = s.hasSubjectCompleted ? 3 : (s.decksCount ? Math.min(3, s.decksCount) : 0);
         break;
-      case 'mastery_100':
-        currentProgress = s.masteredCardsCount;
+      case 'retention_centurion':
+        progress = s.masteredCardsCount || 0;
         break;
+      case 'weakness_slayer':
+        progress = s.weakTopicsFixed || 0;
+        break;
+      case 'viva_scholar':
+        progress = s.vivaSessionsCompleted || 0;
+        break;
+      case 'knowledge_architect':
+        progress = s.connectionsCount || 0;
+        break;
+      default:
+        progress = 0;
     }
 
-    const isUnlocked = unlockedSet.has(def.id) || currentProgress >= def.threshold;
+    const wasAlreadyUnlocked = unlockedIds.has(def.id);
+    const isNowUnlocked = wasAlreadyUnlocked || progress >= def.threshold;
 
-    // Auto-unlock if condition reached and not recorded
-    if (isUnlocked && !unlockedSet.has(def.id)) {
-      unlockedSet.add(def.id);
-      persistStorage();
-
-      // Award XP for unlocking achievement!
-      awardXP(
-        user,
-        'achievement_unlocked',
-        def.xpReward,
-        `Unlocked Badge: ${def.title}`,
-        `achievement-${def.id}-${user}`
-      );
-
-      // Async sync to Supabase
-      try {
-        const admin = createAdminClient();
-        (async () => {
-          try {
-            const { error: sbErr } = await admin.from('user_achievements').insert({
-              user_id: user,
-              achievement_id: def.id,
-              unlocked_at: new Date().toISOString(),
-            });
-            if (sbErr) {
-              console.warn(`[Supabase user_achievements sync]: ${sbErr.code} - ${sbErr.message}`);
-            }
-          } catch (err: any) {
-            console.warn(`[Supabase user_achievements exception]: ${err?.message}`);
-          }
-        })();
-      } catch (clientErr: any) {
-        console.warn(`[Supabase client error]: ${clientErr?.message}`);
-      }
+    if (!wasAlreadyUnlocked && isNowUnlocked) {
+      newlyUnlocked.push(def.id);
+      unlockedIds.add(def.id);
     }
 
-    results.push({
-      id: `${user}-${def.id}`,
+    return {
+      id: def.id,
       userId: user,
       achievementId: def.id,
       title: def.title,
@@ -1028,11 +1090,29 @@ export function getUserAchievements(
       icon: def.icon,
       category: def.category,
       xpReward: def.xpReward,
+      isUnlocked: isNowUnlocked,
+      unlockedAt: isNowUnlocked ? new Date().toISOString() : null,
+      progress: Math.min(def.threshold, progress),
+      currentProgress: Math.min(def.threshold, progress),
       threshold: def.threshold,
-      currentProgress: Math.min(def.threshold, currentProgress),
-      isUnlocked,
-      unlockedAt: isUnlocked ? new Date().toISOString() : null,
-    });
+      progressPercentage: Math.min(100, Math.round((progress / def.threshold) * 100)),
+    };
+  });
+
+  // Persist newly unlocked badges to Supabase
+  if (newlyUnlocked.length > 0 && user !== 'demo-guest-user') {
+    try {
+      const admin = createAdminClient();
+      for (const badgeId of newlyUnlocked) {
+        await admin.from('user_achievements').upsert({
+          user_id: user,
+          achievement_id: badgeId,
+          unlocked_at: new Date().toISOString(),
+        }, { onConflict: 'user_id, achievement_id' });
+      }
+    } catch (persistErr: any) {
+      console.warn('[getUserAchievements] Persistence notice:', persistErr?.message);
+    }
   }
 
   return results;
@@ -1052,54 +1132,66 @@ export const DEFAULT_LEARNING_GOALS: Omit<LearningGoals, 'userId'> = {
   weeklyExamsCompleted: 1,
 };
 
-export function getLearningGoals(userId: string): LearningGoals {
-  loadStorage();
+export async function getLearningGoals(userId: string): Promise<LearningGoals> {
   const user = userId || 'default-user';
-  const existing = memoryGoals.get(user);
-  if (existing) return existing;
 
-  const initial: LearningGoals = {
-    userId: user,
-    ...DEFAULT_LEARNING_GOALS,
-  };
-  memoryGoals.set(user, initial);
-  persistStorage();
-  return initial;
-}
+  if (user === 'demo-guest-user') {
+    return demoGoalsMap.get(user) || { userId: user, ...DEFAULT_LEARNING_GOALS };
+  }
 
-export function saveLearningGoals(goals: LearningGoals): LearningGoals {
-  loadStorage();
-  memoryGoals.set(goals.userId, goals);
-  persistStorage();
-
-  // Async sync to Supabase
   try {
     const admin = createAdminClient();
-    (async () => {
-      try {
-        const { error: sbErr } = await admin.from('learning_goals').upsert(
-          {
-            user_id: goals.userId,
-            daily_study_minutes: goals.dailyStudyMinutes,
-            daily_cards_reviewed: goals.dailyCardsReviewed,
-            daily_questions_practiced: goals.dailyQuestionsPracticed,
-            weekly_study_hours: goals.weeklyStudyHours,
-            weekly_decks_completed: goals.weeklyDecksCompleted,
-            weekly_quizzes_attempted: goals.weeklyQuizzesAttempted,
-            weekly_exams_completed: goals.weeklyExamsCompleted,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'user_id' }
-        );
-        if (sbErr) {
-          console.warn(`[Supabase learning_goals sync]: ${sbErr.code} - ${sbErr.message}`);
-        }
-      } catch (err: any) {
-        console.warn(`[Supabase learning_goals exception]: ${err?.message}`);
-      }
-    })();
-  } catch (clientErr: any) {
-    console.warn(`[Supabase client error]: ${clientErr?.message}`);
+    const { data, error } = await admin
+      .from('learning_goals')
+      .select('*')
+      .eq('user_id', user)
+      .maybeSingle();
+
+    if (!error && data) {
+      return {
+        userId: user,
+        dailyStudyMinutes: data.daily_study_minutes ?? 20,
+        dailyCardsReviewed: data.daily_cards_reviewed ?? 15,
+        dailyQuestionsPracticed: data.daily_questions_practiced ?? 5,
+        weeklyStudyHours: Number(data.weekly_study_hours) || 2.5,
+        weeklyDecksCompleted: data.weekly_decks_completed ?? 2,
+        weeklyQuizzesAttempted: data.weekly_quizzes_attempted ?? 3,
+        weeklyExamsCompleted: data.weekly_exams_completed ?? 1,
+      };
+    }
+  } catch (err: any) {
+    console.warn('[getLearningGoals] Supabase query notice:', err?.message);
+  }
+
+  return { userId: user, ...DEFAULT_LEARNING_GOALS };
+}
+
+export async function saveLearningGoals(goals: LearningGoals): Promise<LearningGoals> {
+  const user = goals.userId || 'default-user';
+
+  if (user === 'demo-guest-user') {
+    demoGoalsMap.set(user, goals);
+    return goals;
+  }
+
+  try {
+    const admin = createAdminClient();
+    await admin.from('learning_goals').upsert(
+      {
+        user_id: user,
+        daily_study_minutes: goals.dailyStudyMinutes,
+        daily_cards_reviewed: goals.dailyCardsReviewed,
+        daily_questions_practiced: goals.dailyQuestionsPracticed,
+        weekly_study_hours: goals.weeklyStudyHours,
+        weekly_decks_completed: goals.weeklyDecksCompleted,
+        weekly_quizzes_attempted: goals.weeklyQuizzesAttempted,
+        weekly_exams_completed: goals.weeklyExamsCompleted,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' }
+    );
+  } catch (err: any) {
+    console.warn('[saveLearningGoals] Supabase upsert notice:', err?.message);
   }
 
   return goals;
@@ -1108,104 +1200,148 @@ export function saveLearningGoals(goals: LearningGoals): LearningGoals {
 export function calculateGoalProgress(
   goals: LearningGoals,
   activity: {
-    todayStudyMinutes: number;
-    todayCardsReviewed: number;
-    todayQuestionsPracticed: number;
-    thisWeekStudyHours: number;
-    thisWeekDecksCompleted: number;
-    thisWeekQuizzesAttempted: number;
-    thisWeekExamsCompleted: number;
+    todayStudyMinutes?: number;
+    todayCardsReviewed?: number;
+    todayQuestionsPracticed?: number;
+    thisWeekStudyHours?: number;
+    thisWeekDecksCompleted?: number;
+    thisWeekQuizzesAttempted?: number;
+    thisWeekExamsCompleted?: number;
   }
 ): GoalProgressSummary {
+  const a = activity || {};
+  const todayMins = a.todayStudyMinutes || 0;
+  const todayCards = a.todayCardsReviewed || 0;
+  const todayQuestions = a.todayQuestionsPracticed || 0;
+  const weekHours = a.thisWeekStudyHours || 0;
+  const weekDecks = a.thisWeekDecksCompleted || 0;
+  const weekQuizzes = a.thisWeekQuizzesAttempted || 0;
+  const weekExams = a.thisWeekExamsCompleted || 0;
+
   const daily: GoalProgressItem[] = [
     {
+      id: 'daily_time',
       metric: 'dailyStudyMinutes',
       label: 'Study Time',
       target: goals.dailyStudyMinutes,
-      actual: activity.todayStudyMinutes,
+      current: todayMins,
+      actual: todayMins,
       unit: 'mins',
-      percentage: Math.min(100, Math.round((activity.todayStudyMinutes / goals.dailyStudyMinutes) * 100)),
-      isCompleted: activity.todayStudyMinutes >= goals.dailyStudyMinutes,
+      percentage: Math.min(100, Math.round((todayMins / goals.dailyStudyMinutes) * 100)),
+      isCompleted: todayMins >= goals.dailyStudyMinutes,
+      timeframe: 'daily',
     },
     {
+      id: 'daily_cards',
       metric: 'dailyCardsReviewed',
       label: 'Cards Reviewed',
       target: goals.dailyCardsReviewed,
-      actual: activity.todayCardsReviewed,
+      current: todayCards,
+      actual: todayCards,
       unit: 'cards',
-      percentage: Math.min(100, Math.round((activity.todayCardsReviewed / goals.dailyCardsReviewed) * 100)),
-      isCompleted: activity.todayCardsReviewed >= goals.dailyCardsReviewed,
+      percentage: Math.min(100, Math.round((todayCards / goals.dailyCardsReviewed) * 100)),
+      isCompleted: todayCards >= goals.dailyCardsReviewed,
+      timeframe: 'daily',
     },
     {
+      id: 'daily_questions',
       metric: 'dailyQuestionsPracticed',
       label: 'Practice Questions',
       target: goals.dailyQuestionsPracticed,
-      actual: activity.todayQuestionsPracticed,
+      current: todayQuestions,
+      actual: todayQuestions,
       unit: 'items',
       percentage: Math.min(
         100,
-        Math.round((activity.todayQuestionsPracticed / goals.dailyQuestionsPracticed) * 100)
+        Math.round((todayQuestions / goals.dailyQuestionsPracticed) * 100)
       ),
-      isCompleted: activity.todayQuestionsPracticed >= goals.dailyQuestionsPracticed,
+      isCompleted: todayQuestions >= goals.dailyQuestionsPracticed,
+      timeframe: 'daily',
     },
   ];
 
   const weekly: GoalProgressItem[] = [
     {
+      id: 'weekly_hours',
       metric: 'weeklyStudyHours',
       label: 'Study Duration',
       target: goals.weeklyStudyHours,
-      actual: Math.round(activity.thisWeekStudyHours * 10) / 10,
+      current: weekHours,
+      actual: Math.round(weekHours * 10) / 10,
       unit: 'hrs',
-      percentage: Math.min(100, Math.round((activity.thisWeekStudyHours / goals.weeklyStudyHours) * 100)),
-      isCompleted: activity.thisWeekStudyHours >= goals.weeklyStudyHours,
+      percentage: Math.min(100, Math.round((weekHours / goals.weeklyStudyHours) * 100)),
+      isCompleted: weekHours >= goals.weeklyStudyHours,
+      timeframe: 'weekly',
     },
     {
+      id: 'weekly_decks',
       metric: 'weeklyDecksCompleted',
       label: 'Decks Reviewed',
       target: goals.weeklyDecksCompleted,
-      actual: activity.thisWeekDecksCompleted,
+      current: weekDecks,
+      actual: weekDecks,
       unit: 'decks',
       percentage: Math.min(
         100,
-        Math.round((activity.thisWeekDecksCompleted / goals.weeklyDecksCompleted) * 100)
+        Math.round((weekDecks / goals.weeklyDecksCompleted) * 100)
       ),
-      isCompleted: activity.thisWeekDecksCompleted >= goals.weeklyDecksCompleted,
+      isCompleted: weekDecks >= goals.weeklyDecksCompleted,
+      timeframe: 'weekly',
     },
     {
+      id: 'weekly_quizzes',
       metric: 'weeklyQuizzesAttempted',
       label: 'Quizzes Taken',
       target: goals.weeklyQuizzesAttempted,
-      actual: activity.thisWeekQuizzesAttempted,
+      current: weekQuizzes,
+      actual: weekQuizzes,
       unit: 'quizzes',
       percentage: Math.min(
         100,
-        Math.round((activity.thisWeekQuizzesAttempted / goals.weeklyQuizzesAttempted) * 100)
+        Math.round((weekQuizzes / goals.weeklyQuizzesAttempted) * 100)
       ),
-      isCompleted: activity.thisWeekQuizzesAttempted >= goals.weeklyQuizzesAttempted,
+      isCompleted: weekQuizzes >= goals.weeklyQuizzesAttempted,
+      timeframe: 'weekly',
     },
     {
+      id: 'weekly_exams',
       metric: 'weeklyExamsCompleted',
-      label: 'Mock Exams',
+      label: 'Exams Taken',
       target: goals.weeklyExamsCompleted,
-      actual: activity.thisWeekExamsCompleted,
+      current: weekExams,
+      actual: weekExams,
       unit: 'exams',
       percentage: Math.min(
         100,
-        Math.round((activity.thisWeekExamsCompleted / goals.weeklyExamsCompleted) * 100)
+        Math.round((weekExams / goals.weeklyExamsCompleted) * 100)
       ),
-      isCompleted: activity.thisWeekExamsCompleted >= goals.weeklyExamsCompleted,
+      isCompleted: weekExams >= goals.weeklyExamsCompleted,
+      timeframe: 'weekly',
     },
   ];
 
-  const dailyMet = daily.filter((d) => d.isCompleted).length;
-  const weeklyMet = weekly.filter((w) => w.isCompleted).length;
+  const dailyMet = daily.filter((i) => i.isCompleted).length;
+  const weeklyMet = weekly.filter((i) => i.isCompleted).length;
+
+  const dailyCompletionPercentage = Math.round((dailyMet / daily.length) * 100);
+  const weeklyCompletionPercentage = Math.round((weeklyMet / weekly.length) * 100);
+
+  const items = [...daily, ...weekly];
+  const overallCompletionPercentage = Math.round(
+    items.reduce((sum, item) => sum + item.percentage, 0) / items.length
+  );
 
   return {
     daily,
     weekly,
-    dailyCompletionPercentage: Math.round((dailyMet / daily.length) * 100),
-    weeklyCompletionPercentage: Math.round((weeklyMet / weekly.length) * 100),
+    dailyCompletionPercentage,
+    weeklyCompletionPercentage,
+    dailyCompletedCount: dailyMet,
+    dailyTotalCount: daily.length,
+    weeklyCompletedCount: weeklyMet,
+    weeklyTotalCount: weekly.length,
+    overallCompletionPercentage,
+    items,
   };
 }
 
@@ -1213,7 +1349,7 @@ export function calculateGoalProgress(
 // 9. QUIZ ATTEMPT RECORDER
 // ============================================================================
 
-export function recordQuizAttempt(
+export async function recordQuizAttempt(
   userId: string,
   deckId: string,
   deckName: string,
@@ -1221,9 +1357,7 @@ export function recordQuizAttempt(
   totalItems: number,
   durationSeconds: number,
   topicBreakdown: Array<{ topic: string; correct: number; total: number }> = []
-): QuizAttemptLog {
-  loadStorage();
-
+): Promise<QuizAttemptLog> {
   const accuracyPercentage = totalItems > 0 ? Math.round((score / totalItems) * 100) : 0;
   const log: QuizAttemptLog = {
     id: uuidv4(),
@@ -1239,13 +1373,42 @@ export function recordQuizAttempt(
     topicBreakdown,
   };
 
-  memoryQuizAttempts.push(log);
-  persistStorage();
+  if (userId === 'demo-guest-user') {
+    demoQuizAttempts.push(log);
+    await awardXP(
+      userId,
+      'quiz_completed',
+      25 + (accuracyPercentage >= 80 ? 15 : 0),
+      `Completed Quiz on ${deckName} (${accuracyPercentage}%)`,
+      `quiz-attempt-${log.id}`
+    );
+    await recordActiveStudyDate(userId, 'quiz', durationSeconds, 0);
+    return log;
+  }
+
+  try {
+    const admin = createAdminClient();
+    await admin.from('quiz_attempts').insert({
+      id: log.id,
+      quiz_id: isUUID(log.quizId) ? log.quizId : null,
+      deck_id: isUUID(deckId) ? deckId : null,
+      deck_name: deckName,
+      user_id: userId,
+      score,
+      total_items: totalItems,
+      accuracy_percentage: accuracyPercentage,
+      duration_seconds: durationSeconds,
+      topic_breakdown: topicBreakdown,
+      completed_at: log.completedAt,
+    });
+  } catch (err: any) {
+    console.warn('[recordQuizAttempt] Supabase insert notice:', err?.message);
+  }
 
   // Award XP for quiz completion (server-verified idempotency)
   const baseXP = 25;
   const bonusXP = accuracyPercentage >= 80 ? 15 : 0;
-  awardXP(
+  await awardXP(
     userId,
     'quiz_completed',
     baseXP + bonusXP,
@@ -1254,86 +1417,81 @@ export function recordQuizAttempt(
   );
 
   // Record active streak date
-  recordActiveStudyDate(userId, 'quiz', durationSeconds, 0);
-
-  // Async sync to Supabase
-  try {
-    const admin = createAdminClient();
-    (async () => {
-      try {
-        const { error: sbErr } = await admin.from('quiz_attempts').insert({
-          id: log.id,
-          quiz_id: log.quizId,
-          deck_id: deckId,
-          deck_name: deckName,
-          user_id: userId,
-          score,
-          total_items: totalItems,
-          accuracy_percentage: accuracyPercentage,
-          duration_seconds: durationSeconds,
-          topic_breakdown: topicBreakdown,
-          completed_at: log.completedAt,
-        });
-        if (sbErr) {
-          console.warn(`[Supabase quiz_attempts sync]: ${sbErr.code} - ${sbErr.message}`);
-        }
-      } catch (err: any) {
-        console.warn(`[Supabase quiz_attempts exception]: ${err?.message}`);
-      }
-    })();
-  } catch (clientErr: any) {
-    console.warn(`[Supabase client error]: ${clientErr?.message}`);
-  }
+  await recordActiveStudyDate(userId, 'quiz', durationSeconds, 0);
 
   return log;
 }
 
-export function getUserQuizAttempts(userId: string): QuizAttemptLog[] {
-  loadStorage();
+export async function getUserQuizAttempts(userId: string): Promise<QuizAttemptLog[]> {
   const user = userId || 'default-user';
-  return memoryQuizAttempts
-    .filter((a) => a.userId === user)
-    .sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+
+  if (user === 'demo-guest-user') {
+    return demoQuizAttempts.slice().reverse();
+  }
+
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from('quiz_attempts')
+      .select('*')
+      .eq('user_id', user)
+      .order('completed_at', { ascending: false });
+
+    if (!error && Array.isArray(data)) {
+      return data.map((r) => ({
+        id: r.id,
+        quizId: r.quiz_id || r.id,
+        deckId: r.deck_id || '',
+        deckName: r.deck_name || 'Study Quiz',
+        userId: r.user_id,
+        score: r.score,
+        totalItems: r.total_items,
+        accuracyPercentage: Number(r.accuracy_percentage),
+        durationSeconds: r.duration_seconds || 0,
+        completedAt: r.completed_at,
+        topicBreakdown: Array.isArray(r.topic_breakdown) ? r.topic_breakdown : [],
+      }));
+    }
+  } catch (err: any) {
+    console.warn('[getUserQuizAttempts] Supabase query notice:', err?.message);
+  }
+
+  return [];
 }
 
 // ============================================================================
-// 10. PERSONALIZED REVIEW SYSTEM (DUE WORKLOAD & CALENDAR)
+// 10. COMPREHENSIVE ANALYTICS AGGREGATOR
 // ============================================================================
 
 export {
   calculateReviewWorkload,
 };
 
-// ============================================================================
-// 11. COMPREHENSIVE ANALYTICS AGGREGATOR
-// ============================================================================
-
-export function buildComprehensiveAnalytics(
+export async function buildComprehensiveAnalytics(
   userId: string,
   decks: Deck[],
   subjects: Subject[],
-  daysWindow: number = 30 // 7, 30, 90, 365
-): ComprehensiveAnalyticsReport {
-  loadStorage();
+  daysWindow: number = 30
+): Promise<ComprehensiveAnalyticsReport> {
   const user = userId || 'default-user';
 
-  // 1. Gather all events
-  const xpTx = getUserXPTransactions(user);
-  const totalXP = xpTx.reduce((sum, tx) => sum + tx.amount, 0);
+  const [totalXP, streakInfo, quizAttempts, examAttempts, userReviews] = await Promise.all([
+    getUserTotalXP(user),
+    calculateStreaks(user),
+    getUserQuizAttempts(user),
+    getUserExamAttempts(user),
+    getUserFlashcardReviews(user),
+  ]);
+
   const levelInfo = calculateLevelFromXP(totalXP);
-  const streakInfo = calculateStreaks(user);
-  const quizAttempts = getUserQuizAttempts(user);
-  const examAttempts = getUserExamAttempts(user);
 
   // Time window boundary
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - daysWindow);
   const cutoffStr = cutoffDate.toISOString();
 
-  // Filtered by window
   const filteredQuizAttempts = quizAttempts.filter((a) => a.completedAt && a.completedAt >= cutoffStr);
   const filteredExamAttempts = examAttempts.filter((a) => a.submittedAt && a.submittedAt >= cutoffStr);
-  const userReviews = memoryReviews.filter((r) => r.userId === user);
   const filteredReviews = userReviews.filter((r) => r.reviewedAt >= cutoffStr);
 
   // Cards & decks totals
@@ -1375,17 +1533,18 @@ export function buildComprehensiveAnalytics(
   const retentionMasteryPercentage =
     totalCards > 0 ? Math.round((masteredCards / totalCards) * 100) : 0;
 
+  const successReviews = userReviews.filter((r) => r.ratingValue >= 3).length;
+  const reviewSuccessRate =
+    userReviews.length > 0 ? Math.round((successReviews / userReviews.length) * 100) : 100;
+
   // Study Time summation
   let totalStudySeconds = 0;
-  // From exams:
   for (const ea of examAttempts) {
     totalStudySeconds += ea.timeSpentSeconds || 0;
   }
-  // From quizzes:
   for (const qa of quizAttempts) {
     totalStudySeconds += qa.durationSeconds || 0;
   }
-  // From flashcards (~20s per review if not logged):
   for (const fr of userReviews) {
     totalStudySeconds += Math.max(15, Math.round((fr.durationMs || 0) / 1000));
   }
@@ -1397,18 +1556,21 @@ export function buildComprehensiveAnalytics(
   const avgQuiz =
     quizAttempts.length > 0
       ? Math.round(
-          quizAttempts.reduce((sum, q) => sum + (q.accuracyPercentage || 0), 0) /
-            quizAttempts.length
+          quizAttempts.reduce((sum, q) => sum + (q.accuracyPercentage || 0), 0) / quizAttempts.length
         )
       : 0;
 
   const avgExam =
     examAttempts.length > 0
       ? Math.round(
-          examAttempts.reduce((sum, e) => sum + (e.percentage || 0), 0) /
-            examAttempts.length
+          examAttempts.reduce((sum, e) => sum + (e.accuracyPercentage || 0), 0) / examAttempts.length
         )
       : 0;
+
+  const overallAccuracy =
+    quizAttempts.length + examAttempts.length > 0
+      ? Math.round((avgQuiz * quizAttempts.length + avgExam * examAttempts.length) / (quizAttempts.length + examAttempts.length))
+      : 75;
 
   // Daily activity distribution (last 14 days)
   const dailyActivity: Array<{ date: string; dayLabel: string; studySeconds: number; cardsReviewed: number }> = [];
@@ -1453,7 +1615,6 @@ export function buildComprehensiveAnalytics(
     dayCounts[fullDayName] = (dayCounts[fullDayName] || 0) + secs;
   }
 
-  // Find most active study day
   let mostActiveDay = 'Wednesday';
   let maxDaySecs = -1;
   for (const [dayName, sCount] of Object.entries(dayCounts)) {
@@ -1462,32 +1623,6 @@ export function buildComprehensiveAnalytics(
       mostActiveDay = dayName;
     }
   }
-
-  // Review success rate (% good/easy out of all reviews)
-  const successReviews = userReviews.filter(
-    (r) => r.responseType === 'good' || r.responseType === 'easy' || r.responseType === 'medium'
-  ).length;
-  const reviewSuccessRate =
-    userReviews.length > 0 ? Math.round((successReviews / userReviews.length) * 100) : 100;
-
-  // Topic breakdown from exams & quizzes
-  const topicMap: Record<string, { correct: number; total: number }> = {};
-  for (const ea of examAttempts) {
-    if (ea.topicBreakdown) {
-      for (const t of ea.topicBreakdown) {
-        if (!topicMap[t.topic]) topicMap[t.topic] = { correct: 0, total: 0 };
-        topicMap[t.topic].correct += t.correct;
-        topicMap[t.topic].total += t.total;
-      }
-    }
-  }
-
-  const topicBreakdown = Object.entries(topicMap).map(([topic, stat]) => ({
-    topic,
-    correct: stat.correct,
-    total: stat.total,
-    accuracy: stat.total > 0 ? Math.round((stat.correct / stat.total) * 100) : 0,
-  }));
 
   // Subject performance ranking
   const subjectRankings = Object.values(subjectMasteryMap)
@@ -1502,22 +1637,102 @@ export function buildComprehensiveAnalytics(
   const strongestSubjects = subjectRankings.slice(0, 3);
   const weakestSubjects = [...subjectRankings].reverse().slice(0, 3);
 
-  // Overall accuracy
-  const totalTestedItems =
-    quizAttempts.reduce((sum, q) => sum + q.totalItems, 0) +
-    examAttempts.reduce((sum, e) => sum + e.totalQuestions, 0);
-  const totalCorrectItems =
-    quizAttempts.reduce((sum, q) => sum + q.score, 0) +
-    examAttempts.reduce((sum, e) => sum + (e.correctCount || 0), 0);
-  const overallAccuracy =
-    totalTestedItems > 0 ? Math.round((totalCorrectItems / totalTestedItems) * 100) : 85;
-
   const workload = calculateReviewWorkload(decks, subjects);
+
+  // Study Time Trends (Last 7 Days)
+  const studyTimeTrends: Array<{ date: string; dayLabel: string; seconds: number; minutes: number }> = [];
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dStr = getLocalDateString(d);
+    const dayLabel = dayNames[d.getDay()];
+
+    let daySec = 0;
+    filteredQuizAttempts.forEach((q) => {
+      if (q.completedAt.startsWith(dStr)) daySec += q.durationSeconds || 0;
+    });
+    filteredExamAttempts.forEach((e) => {
+      if (e.submittedAt && e.submittedAt.startsWith(dStr)) daySec += e.timeSpentSeconds || 0;
+    });
+    filteredReviews.forEach((r) => {
+      if (r.reviewedAt.startsWith(dStr)) daySec += Math.round((r.durationMs || 0) / 1000);
+    });
+
+    studyTimeTrends.push({
+      date: dStr,
+      dayLabel,
+      seconds: daySec,
+      minutes: Math.round(daySec / 60),
+    });
+  }
+
+  // Retention Curve (Ebbinghaus decay curve)
+  const retentionCurve: Array<{ daysSinceReview: number; retentionProbability: number; cardCount: number }> = [];
+  const intervals = [1, 3, 7, 14, 30, 60, 90];
+
+  for (const day of intervals) {
+    const retentionProb = Math.max(20, Math.round(100 * Math.exp(-day / 35)));
+    const matchingCards = Math.max(
+      0,
+      Math.round(totalCards * (retentionProb / 100) * (0.8 + (day % 3) * 0.1))
+    );
+    retentionCurve.push({
+      daysSinceReview: day,
+      retentionProbability: retentionProb,
+      cardCount: matchingCards,
+    });
+  }
+
+  // Subject Breakdown
+  const subjectBreakdown = subjects.map((sub) => {
+    const entry = subjectMasteryMap[sub.id] || { total: 0, mastered: 0 };
+    return {
+      subjectId: sub.id,
+      subjectName: sub.name,
+      totalCards: entry.total,
+      masteredCards: entry.mastered,
+      accuracyPercentage: entry.total > 0 ? Math.round((entry.mastered / entry.total) * 100) : 0,
+      timeSpentSeconds: Math.round(totalStudySeconds / Math.max(1, subjects.length)),
+    };
+  });
+
+  // Weak Topics Detection
+  const topicStats: Record<string, { correct: number; total: number; source: 'quiz' | 'flashcards' | 'exam' }> = {};
+
+  quizAttempts.forEach((qa) => {
+    qa.topicBreakdown?.forEach((t) => {
+      if (!topicStats[t.topic]) topicStats[t.topic] = { correct: 0, total: 0, source: 'quiz' };
+      topicStats[t.topic].correct += t.correct;
+      topicStats[t.topic].total += t.total;
+    });
+  });
+
+  examAttempts.forEach((ea) => {
+    ea.topicBreakdown?.forEach((t) => {
+      if (!topicStats[t.topic]) topicStats[t.topic] = { correct: 0, total: 0, source: 'exam' };
+      topicStats[t.topic].correct += t.correct;
+      topicStats[t.topic].total += t.total;
+    });
+  });
+
+  const weakTopics = Object.entries(topicStats)
+    .filter(([_, data]) => data.total >= 2 && Math.round((data.correct / data.total) * 100) < 70)
+    .map(([topic, data]) => ({
+      topic,
+      accuracyPercentage: Math.round((data.correct / data.total) * 100),
+      totalAttempts: data.total,
+      source: data.source,
+    }))
+    .sort((a, b) => a.accuracyPercentage - b.accuracyPercentage)
+    .slice(0, 5);
 
   return {
     overview: {
       totalStudySeconds,
       totalStudyHoursFormatted,
+      totalStudyHours: totalStudyHoursFormatted,
       totalFlashcardsReviewed: userReviews.length,
       totalDecks: decks.length,
       totalCards,
@@ -1530,6 +1745,14 @@ export function buildComprehensiveAnalytics(
       retentionMasteryPercentage,
       level: levelInfo.currentLevel,
       totalXP,
+      totalCardsReviewed: userReviews.length,
+      cardsMasteredCount: masteredCards,
+      cardsLearningCount: learningCards,
+      cardsNewCount: newCards,
+      overallAccuracy,
+      levelInfo,
+      retentionRatePercentage: retentionMasteryPercentage,
+      streakInfo,
     },
     learningActivity: {
       dailyActivity,
@@ -1557,7 +1780,12 @@ export function buildComprehensiveAnalytics(
           percentage: e.percentage,
           title: e.examTitle || 'Simulated Exam',
         })),
-      topicBreakdown,
+      topicBreakdown: Object.entries(topicStats).map(([topic, stat]) => ({
+        topic,
+        correct: stat.correct,
+        total: stat.total,
+        accuracy: stat.total > 0 ? Math.round((stat.correct / stat.total) * 100) : 0,
+      })),
       strongestSubjects,
       weakestSubjects,
       overallAccuracy,
@@ -1584,23 +1812,52 @@ export function buildComprehensiveAnalytics(
       consistencyPercentage: Math.min(100, Math.round((streakInfo.activeDates.length / Math.max(1, daysWindow)) * 100)),
       goalCompletionRate: Math.min(100, Math.round((streakInfo.currentStreak / 7) * 100)),
     },
+    studyTimeTrends,
+    retentionCurve,
+    subjectBreakdown,
+    weakTopics,
+    dailyPerformance: {
+      averageReviewSpeedSeconds:
+        userReviews.length > 0
+          ? Math.max(
+              5,
+              Math.round(
+                userReviews.reduce((sum, r) => sum + (r.durationMs || 0), 0) /
+                  (userReviews.length * 1000)
+              )
+            )
+          : 25,
+      consistencyPercentage: Math.min(
+        100,
+        Math.round((streakInfo.activeDates.length / Math.max(1, daysWindow)) * 100)
+      ),
+      goalCompletionRate: Math.min(100, Math.round((streakInfo.currentStreak / 7) * 100)),
+    },
   };
 }
 
-/**
- * Purges all analytics, reviews, quiz attempts, goals, XP, and streak records for a user (GDPR / account deletion).
- */
-export function purgeUserAnalyticsData(userId: string): void {
-  loadStorage();
-  for (const [key, tx] of memoryXP.entries()) {
-    if (tx.userId === userId) {
-      memoryXP.delete(key);
-    }
+export async function purgeUserAnalyticsData(userId: string): Promise<void> {
+  if (userId === 'demo-guest-user') {
+    demoXPMap.clear();
+    demoGoalsMap.clear();
+    demoReviews = [];
+    demoQuizAttempts = [];
+    demoAchievements.clear();
+    demoStreakDates.clear();
+    return;
   }
-  memoryGoals.delete(userId);
-  memoryReviews = memoryReviews.filter((r) => r.userId !== userId);
-  memoryQuizAttempts = memoryQuizAttempts.filter((q) => q.userId !== userId);
-  memoryUnlockedAchievements.delete(userId);
-  memoryStreakDates.delete(userId);
-  persistStorage();
+
+  try {
+    const admin = createAdminClient();
+    await Promise.allSettled([
+      admin.from('xp_transactions').delete().eq('user_id', userId),
+      admin.from('learning_goals').delete().eq('user_id', userId),
+      admin.from('streak_history').delete().eq('user_id', userId),
+      admin.from('flashcard_reviews').delete().eq('user_id', userId),
+      admin.from('quiz_attempts').delete().eq('user_id', userId),
+      admin.from('user_achievements').delete().eq('user_id', userId),
+    ]);
+  } catch (err: any) {
+    console.warn('[purgeUserAnalyticsData] Purge notice:', err?.message);
+  }
 }

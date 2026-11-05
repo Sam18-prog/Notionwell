@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Exam ID is required.' }, { status: 400 });
     }
 
-    const exam = getExamConfigById(examId);
+    const exam = await getExamConfigById(examId);
     if (!exam || !exam.questions || exam.questions.length === 0) {
       return NextResponse.json({ success: false, error: 'Exam not found or has no questions.' }, { status: 404 });
     }
@@ -291,7 +291,7 @@ export async function POST(req: NextRequest) {
       createdAt: now.toISOString(),
     };
 
-    saveExamAttempt(attempt);
+    await saveExamAttempt(attempt);
 
     return NextResponse.json({
       success: true,

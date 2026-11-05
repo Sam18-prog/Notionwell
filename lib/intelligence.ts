@@ -9,8 +9,6 @@
  * 6. Unified AI Learning Profile
  */
 
-import fs from 'fs';
-import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getAIClientAndModel } from '@/lib/app';
@@ -185,120 +183,386 @@ export interface UnifiedLearningProfile {
 }
 
 // ============================================================================
-// 2. PERSISTENCE STORAGE LAYER (.intelligence_storage/ + Supabase Sync)
+// 2. AUTHORITATIVE SUPABASE STORAGE LAYER (Zero Filesystem Dependencies)
 // ============================================================================
 
-const STORAGE_DIR = path.join(process.cwd(), '.intelligence_storage');
-
-function ensureStorageDir() {
-  if (!fs.existsSync(STORAGE_DIR)) {
-    fs.mkdirSync(STORAGE_DIR, { recursive: true });
-  }
+function isUUID(str?: string | null): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
 }
 
-function readJSON<T>(fileName: string, fallback: T): T {
-  ensureStorageDir();
-  const filePath = path.join(STORAGE_DIR, fileName);
-  if (!fs.existsSync(filePath)) return fallback;
+// In-Memory cache singletons for demo users
+let demoIntelPaths: LearningPath[] = [];
+let demoIntelTasks: LearningPathTask[] = [];
+let demoIntelAdaptive: AdaptiveProfile[] = [];
+let demoIntelConnections: KnowledgeConnection[] = [];
+let demoIntelVivaSessions: VivaSession[] = [];
+let demoIntelVivaResponses: VivaResponse[] = [];
+
+async function getStoredPaths(userId?: string): Promise<LearningPath[]> {
+  if (userId === 'demo-guest-user') {
+    return demoIntelPaths;
+  }
   try {
-    const raw = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(raw);
-  } catch (err) {
-    console.error(`[IntelligenceStore] Read error on ${fileName}:`, err);
-    return fallback;
+    const admin = createAdminClient();
+    let q = admin.from('learning_paths').select('*').order('created_at', { ascending: false });
+    if (userId) q = q.eq('user_id', userId);
+    const { data, error } = await q;
+    if (!error && Array.isArray(data)) {
+      return data.map((r: any) => ({
+        id: r.id,
+        userId: r.user_id,
+        subjectId: r.subject_id,
+        title: r.title,
+        objective: r.objective,
+        targetDate: r.target_date,
+        dailyMinutes: r.daily_minutes,
+        status: r.status,
+        currentLevel: r.current_level,
+        stagesCount: r.stages_count,
+        metadata: r.metadata || {},
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      }));
+    }
+  } catch (err: any) {
+    console.warn('[getStoredPaths] Supabase notice:', err?.message);
+  }
+  return demoIntelPaths;
+}
+
+async function saveStoredPaths(paths: LearningPath[]): Promise<void> {
+  for (const p of paths) {
+    if (p.userId === 'demo-guest-user') {
+      const idx = demoIntelPaths.findIndex((x) => x.id === p.id);
+      if (idx >= 0) demoIntelPaths[idx] = p; else demoIntelPaths.unshift(p);
+      continue;
+    }
+    try {
+      const admin = createAdminClient();
+      await admin.from('learning_paths').upsert({
+        id: p.id,
+        user_id: p.userId,
+        subject_id: isUUID(p.subjectId) ? p.subjectId : null,
+        title: p.title,
+        objective: p.objective,
+        target_date: p.targetDate,
+        daily_minutes: p.dailyMinutes,
+        status: p.status,
+        current_level: p.currentLevel,
+        stages_count: p.stagesCount,
+        metadata: p.metadata || {},
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'id' });
+    } catch (err: any) {
+      console.warn('[saveStoredPaths] Supabase notice:', err?.message);
+    }
   }
 }
 
-function writeJSON<T>(fileName: string, data: T): void {
-  ensureStorageDir();
-  const filePath = path.join(STORAGE_DIR, fileName);
+async function getStoredTasks(pathId?: string, userId?: string): Promise<LearningPathTask[]> {
+  if (userId === 'demo-guest-user') {
+    return pathId ? demoIntelTasks.filter((t) => t.pathId === pathId) : demoIntelTasks;
+  }
   try {
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-  } catch (err) {
-    console.error(`[IntelligenceStore] Write error on ${fileName}:`, err);
+    const admin = createAdminClient();
+    let q = admin.from('learning_path_tasks').select('*').order('stage_order', { ascending: true }).order('task_order', { ascending: true });
+    if (pathId) q = q.eq('path_id', pathId);
+    if (userId) q = q.eq('user_id', userId);
+    const { data, error } = await q;
+    if (!error && Array.isArray(data)) {
+      return data.map((r: any) => ({
+        id: r.id,
+        pathId: r.path_id,
+        userId: r.user_id,
+        stageOrder: r.stage_order,
+        stageTitle: r.stage_title,
+        taskOrder: r.task_order,
+        title: r.title,
+        description: r.description,
+        taskType: r.task_type,
+        estimatedMinutes: r.estimated_minutes,
+        isCompleted: r.is_completed,
+        completedAt: r.completed_at,
+        dueDate: r.due_date,
+        prerequisiteTaskIds: r.prerequisite_task_ids || [],
+        createdAt: r.created_at,
+      }));
+    }
+  } catch (err: any) {
+    console.warn('[getStoredTasks] Supabase notice:', err?.message);
+  }
+  return demoIntelTasks;
+}
+
+async function saveStoredTasks(tasks: LearningPathTask[]): Promise<void> {
+  for (const t of tasks) {
+    if (t.userId === 'demo-guest-user') {
+      const idx = demoIntelTasks.findIndex((x) => x.id === t.id);
+      if (idx >= 0) demoIntelTasks[idx] = t; else demoIntelTasks.push(t);
+      continue;
+    }
+    try {
+      const admin = createAdminClient();
+      await admin.from('learning_path_tasks').upsert({
+        id: t.id,
+        path_id: t.pathId,
+        user_id: t.userId,
+        stage_order: t.stageOrder,
+        stage_title: t.stageTitle,
+        task_order: t.taskOrder,
+        title: t.title,
+        description: t.description,
+        task_type: t.taskType,
+        estimated_minutes: t.estimatedMinutes,
+        is_completed: t.isCompleted,
+        completed_at: t.completedAt,
+        due_date: t.dueDate,
+        prerequisite_task_ids: t.prerequisiteTaskIds || [],
+      }, { onConflict: 'id' });
+    } catch (err: any) {
+      console.warn('[saveStoredTasks] Supabase notice:', err?.message);
+    }
   }
 }
 
-// In-Memory cache singletons
-const globalIntel = globalThis as unknown as {
-  __intelPaths?: LearningPath[];
-  __intelTasks?: LearningPathTask[];
-  __intelAdaptive?: AdaptiveProfile[];
-  __intelConnections?: KnowledgeConnection[];
-  __intelVivaSessions?: VivaSession[];
-  __intelVivaResponses?: VivaResponse[];
-};
-
-function getStoredPaths(): LearningPath[] {
-  if (!globalIntel.__intelPaths) {
-    globalIntel.__intelPaths = readJSON<LearningPath[]>('paths.json', []);
+async function getStoredAdaptiveProfiles(userId?: string): Promise<AdaptiveProfile[]> {
+  if (userId === 'demo-guest-user') return demoIntelAdaptive;
+  try {
+    const admin = createAdminClient();
+    let q = admin.from('adaptive_learning_profiles').select('*');
+    if (userId) q = q.eq('user_id', userId);
+    const { data, error } = await q;
+    if (!error && Array.isArray(data)) {
+      return data.map((r: any) => ({
+        id: r.id,
+        userId: r.user_id,
+        subjectId: r.subject_id,
+        topic: r.topic,
+        currentDifficulty: r.current_difficulty,
+        rollingAccuracy: Number(r.rolling_accuracy) || 70,
+        totalAttempts: r.total_attempts || 0,
+        consecutiveCorrect: r.consecutive_correct || 0,
+        consecutiveIncorrect: r.consecutive_incorrect || 0,
+        reason: r.reason || '',
+        lastAssessedAt: r.last_assessed_at,
+      }));
+    }
+  } catch (err: any) {
+    console.warn('[getStoredAdaptiveProfiles] Supabase notice:', err?.message);
   }
-  return globalIntel.__intelPaths;
+  return demoIntelAdaptive;
 }
 
-function saveStoredPaths(paths: LearningPath[]) {
-  globalIntel.__intelPaths = paths;
-  writeJSON('paths.json', paths);
-}
-
-function getStoredTasks(): LearningPathTask[] {
-  if (!globalIntel.__intelTasks) {
-    globalIntel.__intelTasks = readJSON<LearningPathTask[]>('path_tasks.json', []);
+async function saveStoredAdaptiveProfiles(profiles: AdaptiveProfile[]): Promise<void> {
+  for (const p of profiles) {
+    if (p.userId === 'demo-guest-user') {
+      const idx = demoIntelAdaptive.findIndex((x) => x.id === p.id || x.topic.toLowerCase() === p.topic.toLowerCase());
+      if (idx >= 0) demoIntelAdaptive[idx] = p; else demoIntelAdaptive.push(p);
+      continue;
+    }
+    try {
+      const admin = createAdminClient();
+      await admin.from('adaptive_learning_profiles').upsert({
+        user_id: p.userId,
+        topic: p.topic,
+        subject_id: isUUID(p.subjectId) ? p.subjectId : null,
+        current_difficulty: p.currentDifficulty,
+        rolling_accuracy: p.rollingAccuracy,
+        total_attempts: p.totalAttempts,
+        consecutive_correct: p.consecutiveCorrect,
+        consecutive_incorrect: p.consecutiveIncorrect,
+        reason: p.reason,
+        last_assessed_at: p.lastAssessedAt,
+      }, { onConflict: 'user_id,topic' });
+    } catch (err: any) {
+      console.warn('[saveStoredAdaptiveProfiles] Supabase notice:', err?.message);
+    }
   }
-  return globalIntel.__intelTasks;
 }
 
-function saveStoredTasks(tasks: LearningPathTask[]) {
-  globalIntel.__intelTasks = tasks;
-  writeJSON('path_tasks.json', tasks);
-}
-
-function getStoredAdaptiveProfiles(): AdaptiveProfile[] {
-  if (!globalIntel.__intelAdaptive) {
-    globalIntel.__intelAdaptive = readJSON<AdaptiveProfile[]>('adaptive.json', []);
+async function getStoredConnections(userId?: string): Promise<KnowledgeConnection[]> {
+  if (userId === 'demo-guest-user') return demoIntelConnections;
+  try {
+    const admin = createAdminClient();
+    let q = admin.from('knowledge_connections').select('*').order('created_at', { ascending: false });
+    if (userId) q = q.eq('user_id', userId);
+    const { data, error } = await q;
+    if (!error && Array.isArray(data)) {
+      return data.map((r: any) => ({
+        id: r.id,
+        userId: r.user_id,
+        subjectId: r.subject_id,
+        title: r.title,
+        connectionType: r.connection_type,
+        description: r.description,
+        sourceDocumentName: r.source_document_name,
+        targetDocumentName: r.target_document_name,
+        sourceChunkSnippet: r.source_chunk_snippet || undefined,
+        targetChunkSnippet: r.target_chunk_snippet || undefined,
+        citations: r.citations || [],
+        createdAt: r.created_at,
+      }));
+    }
+  } catch (err: any) {
+    console.warn('[getStoredConnections] Supabase notice:', err?.message);
   }
-  return globalIntel.__intelAdaptive;
+  return demoIntelConnections;
 }
 
-function saveStoredAdaptiveProfiles(profiles: AdaptiveProfile[]) {
-  globalIntel.__intelAdaptive = profiles;
-  writeJSON('adaptive.json', profiles);
-}
-
-function getStoredConnections(): KnowledgeConnection[] {
-  if (!globalIntel.__intelConnections) {
-    globalIntel.__intelConnections = readJSON<KnowledgeConnection[]>('connections.json', []);
+async function saveStoredConnections(connections: KnowledgeConnection[]): Promise<void> {
+  for (const c of connections) {
+    if (c.userId === 'demo-guest-user') {
+      demoIntelConnections.unshift(c);
+      continue;
+    }
+    try {
+      const admin = createAdminClient();
+      await admin.from('knowledge_connections').upsert({
+        id: c.id,
+        user_id: c.userId,
+        subject_id: isUUID(c.subjectId) ? c.subjectId : null,
+        title: c.title,
+        connection_type: c.connectionType,
+        description: c.description,
+        source_document_name: c.sourceDocumentName,
+        target_document_name: c.targetDocumentName,
+        source_chunk_snippet: c.sourceChunkSnippet || null,
+        target_chunk_snippet: c.targetChunkSnippet || null,
+        citations: c.citations || [],
+        created_at: c.createdAt,
+      }, { onConflict: 'id' });
+    } catch (err: any) {
+      console.warn('[saveStoredConnections] Supabase notice:', err?.message);
+    }
   }
-  return globalIntel.__intelConnections;
 }
 
-function saveStoredConnections(connections: KnowledgeConnection[]) {
-  globalIntel.__intelConnections = connections;
-  writeJSON('connections.json', connections);
-}
-
-function getStoredVivaSessions(): VivaSession[] {
-  if (!globalIntel.__intelVivaSessions) {
-    globalIntel.__intelVivaSessions = readJSON<VivaSession[]>('viva_sessions.json', []);
+async function getStoredVivaSessions(userId?: string): Promise<VivaSession[]> {
+  if (userId === 'demo-guest-user') return demoIntelVivaSessions;
+  try {
+    const admin = createAdminClient();
+    let q = admin.from('viva_sessions').select('*').order('created_at', { ascending: false });
+    if (userId) q = q.eq('user_id', userId);
+    const { data, error } = await q;
+    if (!error && Array.isArray(data)) {
+      return data.map((r: any) => ({
+        id: r.id,
+        userId: r.user_id,
+        subjectId: r.subject_id,
+        deckId: r.deck_id,
+        documentId: r.document_id || undefined,
+        topicTitle: r.title || 'General Academic Topic',
+        vivaMode: r.viva_mode,
+        difficulty: r.difficulty,
+        totalQuestions: r.total_questions,
+        status: r.status,
+        currentQuestionIndex: r.current_question_index || 1,
+        overallScore: r.overall_score ? Number(r.overall_score) : undefined,
+        accuracyScore: r.accuracy_score ? Number(r.accuracy_score) : undefined,
+        depthScore: r.depth_score ? Number(r.depth_score) : undefined,
+        clarityScore: r.clarity_score ? Number(r.clarity_score) : undefined,
+        evaluationSummary: r.evaluation_summary || undefined,
+        createdAt: r.created_at,
+        completedAt: r.completed_at || undefined,
+      }));
+    }
+  } catch (err: any) {
+    console.warn('[getStoredVivaSessions] Supabase notice:', err?.message);
   }
-  return globalIntel.__intelVivaSessions;
+  return demoIntelVivaSessions;
 }
 
-function saveStoredVivaSessions(sessions: VivaSession[]) {
-  globalIntel.__intelVivaSessions = sessions;
-  writeJSON('viva_sessions.json', sessions);
-}
-
-function getStoredVivaResponses(): VivaResponse[] {
-  if (!globalIntel.__intelVivaResponses) {
-    globalIntel.__intelVivaResponses = readJSON<VivaResponse[]>('viva_responses.json', []);
+async function saveStoredVivaSessions(sessions: VivaSession[]): Promise<void> {
+  for (const s of sessions) {
+    if (s.userId === 'demo-guest-user') {
+      const idx = demoIntelVivaSessions.findIndex((x) => x.id === s.id);
+      if (idx >= 0) demoIntelVivaSessions[idx] = s; else demoIntelVivaSessions.unshift(s);
+      continue;
+    }
+    try {
+      const admin = createAdminClient();
+      await admin.from('viva_sessions').upsert({
+        id: s.id,
+        user_id: s.userId,
+        subject_id: isUUID(s.subjectId) ? s.subjectId : null,
+        deck_id: isUUID(s.deckId) ? s.deckId : null,
+        document_id: s.documentId || null,
+        title: s.topicTitle,
+        viva_mode: s.vivaMode,
+        difficulty: s.difficulty,
+        total_questions: s.totalQuestions,
+        status: s.status,
+        overall_score: s.overallScore || null,
+        accuracy_score: s.accuracyScore || null,
+        depth_score: s.depthScore || null,
+        clarity_score: s.clarityScore || null,
+        evaluation_summary: s.evaluationSummary || {},
+        created_at: s.createdAt,
+        completed_at: s.completedAt || null,
+      }, { onConflict: 'id' });
+    } catch (err: any) {
+      console.warn('[saveStoredVivaSessions] Supabase notice:', err?.message);
+    }
   }
-  return globalIntel.__intelVivaResponses;
 }
 
-function saveStoredVivaResponses(responses: VivaResponse[]) {
-  globalIntel.__intelVivaResponses = responses;
-  writeJSON('viva_responses.json', responses);
+async function getStoredVivaResponses(sessionId?: string): Promise<VivaResponse[]> {
+  if (!sessionId) return demoIntelVivaResponses;
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from('viva_responses')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('question_index', { ascending: true });
+
+    if (!error && Array.isArray(data)) {
+      return data.map((r: any) => ({
+        id: r.id,
+        sessionId: r.session_id,
+        userId: r.user_id,
+        questionIndex: r.question_index,
+        questionText: r.question_text,
+        studentResponse: r.student_response,
+        isVoice: Boolean(r.is_voice),
+        score: Number(r.score) || 0,
+        feedback: r.feedback,
+        followUpQuestion: r.follow_up_question || undefined,
+        createdAt: r.created_at,
+      }));
+    }
+  } catch (err: any) {
+    console.warn('[getStoredVivaResponses] Supabase notice:', err?.message);
+  }
+  return demoIntelVivaResponses.filter((r) => r.sessionId === sessionId);
+}
+
+async function saveStoredVivaResponses(responses: VivaResponse[]): Promise<void> {
+  for (const r of responses) {
+    if (r.userId === 'demo-guest-user') {
+      demoIntelVivaResponses.push(r);
+      continue;
+    }
+    try {
+      const admin = createAdminClient();
+      await admin.from('viva_responses').upsert({
+        id: r.id,
+        session_id: r.sessionId,
+        user_id: r.userId,
+        question_index: r.questionIndex,
+        question_text: r.questionText,
+        student_response: r.studentResponse,
+        is_voice: r.isVoice,
+        score: r.score,
+        feedback: r.feedback,
+        follow_up_question: r.followUpQuestion || null,
+        created_at: r.createdAt,
+      }, { onConflict: 'id' });
+    } catch (err: any) {
+      console.warn('[saveStoredVivaResponses] Supabase notice:', err?.message);
+    }
+  }
 }
 
 // ============================================================================
@@ -336,7 +600,7 @@ export async function generatePersonalizedStudyPath(
 
   // Gather context from uploaded documents or decks
   let sourceContext = '';
-  const userDocs = getStoredDocuments(userId);
+  const userDocs = await getStoredDocuments(userId);
   const relevantDocs = documentIds.length > 0
     ? userDocs.filter(d => documentIds.includes(d.id) || documentIds.includes(d.fileName))
     : userDocs.slice(0, 3);
@@ -546,61 +810,16 @@ DESIGN REQUIREMENTS:
     });
   });
 
-  // Save to persistence
-  const existingPaths = getStoredPaths();
-  saveStoredPaths([newPath, ...existingPaths]);
-
-  const existingTasks = getStoredTasks();
-  saveStoredTasks([...tasks, ...existingTasks]);
-
-  // Dual persist to Supabase
-  try {
-    const admin = createAdminClient();
-    (async () => {
-      try {
-        await admin.from('learning_paths').insert({
-          id: newPath.id,
-          user_id: newPath.userId,
-          subject_id: newPath.subjectId,
-          title: newPath.title,
-          objective: newPath.objective,
-          target_date: newPath.targetDate,
-          daily_minutes: newPath.dailyMinutes,
-          status: newPath.status,
-          current_level: newPath.currentLevel,
-          stages_count: newPath.stagesCount,
-          metadata: newPath.metadata,
-        });
-
-        const formattedTasks = tasks.map(t => ({
-          id: t.id,
-          path_id: t.pathId,
-          user_id: t.userId,
-          stage_order: t.stageOrder,
-          stage_title: t.stageTitle,
-          task_order: t.taskOrder,
-          title: t.title,
-          description: t.description,
-          task_type: t.taskType,
-          estimated_minutes: t.estimatedMinutes,
-          is_completed: t.isCompleted,
-          due_date: t.dueDate,
-        }));
-        await admin.from('learning_path_tasks').insert(formattedTasks);
-      } catch (sbErr) {
-        console.warn('[Intelligence] Supabase sync for study path (safe fallback):', sbErr);
-      }
-    })();
-  } catch (e) {
-    // Non-blocking
-  }
+  // Save directly to Supabase persistence
+  await saveStoredPaths([newPath]);
+  await saveStoredTasks(tasks);
 
   return { path: newPath, tasks };
 }
 
-export function getUserStudyPaths(userId: string): Array<LearningPath & { progressPercentage: number; totalTasks: number; completedTasks: number }> {
-  const paths = getStoredPaths().filter(p => p.userId === userId || p.userId === 'shared');
-  const allTasks = getStoredTasks();
+export async function getUserStudyPaths(userId: string): Promise<Array<LearningPath & { progressPercentage: number; totalTasks: number; completedTasks: number }>> {
+  const paths = await getStoredPaths(userId);
+  const allTasks = await getStoredTasks(undefined, userId);
 
   return paths.map(p => {
     const pTasks = allTasks.filter(t => t.pathId === p.id);
@@ -615,18 +834,18 @@ export function getUserStudyPaths(userId: string): Array<LearningPath & { progre
   });
 }
 
-export function getStudyPathDetails(pathId: string, userId: string): { path: LearningPath; tasks: LearningPathTask[] } | null {
-  const p = getStoredPaths().find(item => item.id === pathId && (item.userId === userId || item.userId === 'shared'));
+export async function getStudyPathDetails(pathId: string, userId: string): Promise<{ path: LearningPath; tasks: LearningPathTask[] } | null> {
+  const paths = await getStoredPaths(userId);
+  const p = paths.find(item => item.id === pathId);
   if (!p) return null;
-  const tasks = getStoredTasks()
-    .filter(t => t.pathId === pathId)
+  const tasks = (await getStoredTasks(pathId, userId))
     .sort((a, b) => a.stageOrder - b.stageOrder || a.taskOrder - b.taskOrder);
   return { path: p, tasks };
 }
 
-export function toggleStudyPathTask(taskId: string, userId: string): { success: boolean; task?: LearningPathTask } {
-  const tasks = getStoredTasks();
-  const idx = tasks.findIndex(t => t.id === taskId && (t.userId === userId || t.userId === 'shared'));
+export async function toggleStudyPathTask(taskId: string, userId: string): Promise<{ success: boolean; task?: LearningPathTask }> {
+  const tasks = await getStoredTasks(undefined, userId);
+  const idx = tasks.findIndex(t => t.id === taskId);
   if (idx === -1) return { success: false };
 
   const task = tasks[idx];
@@ -634,49 +853,30 @@ export function toggleStudyPathTask(taskId: string, userId: string): { success: 
   task.isCompleted = nextCompleted;
   task.completedAt = nextCompleted ? new Date().toISOString() : null;
 
-  saveStoredTasks(tasks);
+  await saveStoredTasks([task]);
 
   // Check if all tasks in path are complete
   const pathTasks = tasks.filter(t => t.pathId === task.pathId);
   const allComplete = pathTasks.length > 0 && pathTasks.every(t => t.isCompleted);
-  const paths = getStoredPaths();
-  const pathIdx = paths.findIndex(p => p.id === task.pathId);
-  if (pathIdx !== -1) {
-    if (allComplete) {
-      paths[pathIdx].status = 'completed';
-    } else if (paths[pathIdx].status === 'completed') {
-      paths[pathIdx].status = 'active';
-    }
-    paths[pathIdx].updatedAt = new Date().toISOString();
-    saveStoredPaths(paths);
+  const paths = await getStoredPaths(userId);
+  const targetPath = paths.find(p => p.id === task.pathId);
+  if (targetPath) {
+    targetPath.status = allComplete ? 'completed' : 'active';
+    targetPath.updatedAt = new Date().toISOString();
+    await saveStoredPaths([targetPath]);
   }
-
-  // Supabase sync
-  try {
-    const admin = createAdminClient();
-    (async () => {
-      try {
-        await admin.from('learning_path_tasks').update({
-          is_completed: task.isCompleted,
-          completed_at: task.completedAt,
-        }).eq('id', taskId);
-      } catch (err) {
-        console.warn('[Intelligence] Supabase task toggle sync fallback:', err);
-      }
-    })();
-  } catch (e) {}
 
   return { success: true, task };
 }
 
-export function rescheduleStudyPath(
+export async function rescheduleStudyPath(
   pathId: string,
   userId: string,
   newTargetDate: string,
   dailyMinutes?: number
-): { success: boolean; path?: LearningPath; rescheduledCount: number } {
-  const paths = getStoredPaths();
-  const pathIdx = paths.findIndex(p => p.id === pathId && (p.userId === userId || p.userId === 'shared'));
+): Promise<{ success: boolean; path?: LearningPath; rescheduledCount: number }> {
+  const paths = await getStoredPaths(userId);
+  const pathIdx = paths.findIndex(p => p.id === pathId);
   if (pathIdx === -1) return { success: false, rescheduledCount: 0 };
 
   const targetPath = paths[pathIdx];
@@ -684,8 +884,8 @@ export function rescheduleStudyPath(
   if (dailyMinutes) targetPath.dailyMinutes = dailyMinutes;
   targetPath.updatedAt = new Date().toISOString();
 
-  const tasks = getStoredTasks();
-  const remainingTasks = tasks.filter(t => t.pathId === pathId && !t.isCompleted);
+  const tasks = await getStoredTasks(pathId, userId);
+  const remainingTasks = tasks.filter(t => !t.isCompleted);
 
   const today = new Date();
   const target = new Date(newTargetDate);
@@ -700,22 +900,8 @@ export function rescheduleStudyPath(
     offset = Math.min(daysDiff, offset + step);
   });
 
-  saveStoredPaths(paths);
-  saveStoredTasks(tasks);
-
-  // Sync to Supabase
-  try {
-    const admin = createAdminClient();
-    (async () => {
-      try {
-        await admin.from('learning_paths').update({
-          target_date: newTargetDate,
-          daily_minutes: targetPath.dailyMinutes,
-          updated_at: targetPath.updatedAt,
-        }).eq('id', pathId);
-      } catch (e) {}
-    })();
-  } catch (e) {}
+  await saveStoredPaths([targetPath]);
+  await saveStoredTasks(remainingTasks);
 
   return { success: true, path: targetPath, rescheduledCount: remainingTasks.length };
 }
@@ -724,17 +910,17 @@ export function rescheduleStudyPath(
 // 4. ADAPTIVE LEARNING & DIFFICULTY ADJUSTMENT ENGINE
 // ============================================================================
 
-export function recordAdaptiveAttempt(
+export async function recordAdaptiveAttempt(
   userId: string,
   topic: string,
   correct: number,
   total: number,
   sourceType: 'quiz' | 'exam' | 'flashcard' = 'quiz',
   subjectId: string | null = null
-): AdaptiveProfile {
-  const profiles = getStoredAdaptiveProfiles();
+): Promise<AdaptiveProfile> {
+  const profiles = await getStoredAdaptiveProfiles(userId);
   const cleanTopic = topic.trim();
-  let profile = profiles.find(p => p.userId === userId && p.topic.toLowerCase() === cleanTopic.toLowerCase());
+  let profile = profiles.find(p => p.topic.toLowerCase() === cleanTopic.toLowerCase());
 
   const attemptAccuracy = total > 0 ? (correct / total) * 100 : 0;
   const isSuccess = attemptAccuracy >= 70;
@@ -753,7 +939,6 @@ export function recordAdaptiveAttempt(
       reason: `Initial assessment from ${sourceType}: scored ${Math.round(attemptAccuracy)}%.`,
       lastAssessedAt: new Date().toISOString(),
     };
-    profiles.push(profile);
   } else {
     // Rolling accuracy over recent sessions (exponential moving average: 40% new attempt, 60% historical)
     const newRolling = Math.round(profile.rollingAccuracy * 0.60 + attemptAccuracy * 0.40);
@@ -787,43 +972,19 @@ export function recordAdaptiveAttempt(
     }
   }
 
-  saveStoredAdaptiveProfiles(profiles);
-
-  // Background sync to Supabase
-  try {
-    const admin = createAdminClient();
-    (async () => {
-      try {
-        await admin.from('adaptive_learning_profiles').upsert({
-          user_id: profile!.userId,
-          topic: profile!.topic,
-          subject_id: profile!.subjectId,
-          current_difficulty: profile!.currentDifficulty,
-          rolling_accuracy: profile!.rollingAccuracy,
-          total_attempts: profile!.totalAttempts,
-          consecutive_correct: profile!.consecutiveCorrect,
-          consecutive_incorrect: profile!.consecutiveIncorrect,
-          reason: profile!.reason,
-          last_assessed_at: profile!.lastAssessedAt,
-        }, { onConflict: 'user_id,topic' });
-      } catch (err) {
-        console.warn('[Intelligence] Supabase adaptive profile sync fallback:', err);
-      }
-    })();
-  } catch (e) {}
-
+  await saveStoredAdaptiveProfiles([profile]);
   return profile;
 }
 
-export function getUserAdaptiveProfiles(userId: string): AdaptiveProfile[] {
-  return getStoredAdaptiveProfiles().filter(p => p.userId === userId || p.userId === 'shared');
+export async function getUserAdaptiveProfiles(userId: string): Promise<AdaptiveProfile[]> {
+  return await getStoredAdaptiveProfiles(userId);
 }
 
 // ============================================================================
 // 5. INTELLIGENT WEAK-TOPIC DETECTION ENGINE
 // ============================================================================
 
-export function detectWeakTopics(userId: string): WeakTopicItem[] {
+export async function detectWeakTopics(userId: string): Promise<WeakTopicItem[]> {
   const weakTopicsMap = new Map<string, {
     topic: string;
     totalAttempts: number;
@@ -852,7 +1013,7 @@ export function detectWeakTopics(userId: string): WeakTopicItem[] {
   }
 
   // 1. Inspect recent quiz attempts & breakdowns
-  const quizzes = getUserQuizAttempts(userId);
+  const quizzes = await getUserQuizAttempts(userId);
   quizzes.forEach(q => {
     if (q.topicBreakdown && Array.isArray(q.topicBreakdown)) {
       q.topicBreakdown.forEach(tb => {
@@ -881,7 +1042,7 @@ export function detectWeakTopics(userId: string): WeakTopicItem[] {
   });
 
   // 2. Inspect exam attempts
-  const exams = getUserExamAttempts(userId);
+  const exams = await getUserExamAttempts(userId);
   exams.forEach(e => {
     const isPass = e.percentage >= 70;
     const examTopic = e.examTitle || e.subjectName || 'Comprehensive Exam';
@@ -894,7 +1055,7 @@ export function detectWeakTopics(userId: string): WeakTopicItem[] {
   });
 
   // 3. Inspect SM-2 flashcard reviews
-  const reviews = getUserFlashcardReviews(userId);
+  const reviews = await getUserFlashcardReviews(userId);
   reviews.forEach(r => {
     // Rating 1 (again) or 2 (hard) constitutes recall lapse
     const isLapse = r.ratingValue <= 2;
@@ -963,17 +1124,17 @@ export async function discoverCrossDocumentConnections(
   documentIds?: string[],
   subjectId?: string | null
 ): Promise<KnowledgeConnection[]> {
-  const docs = getStoredDocuments(userId);
+  const docs = await getStoredDocuments(userId);
   const targetDocs = documentIds && documentIds.length > 0
     ? docs.filter(d => documentIds.includes(d.id) || documentIds.includes(d.fileName))
     : docs.slice(0, 4);
 
   if (targetDocs.length < 2) {
     // If fewer than 2 documents are selected, return existing saved connections
-    return getStoredConnections().filter(c => c.userId === userId || c.userId === 'shared');
+    return await getStoredConnections(userId);
   }
 
-  const existingConnections = getStoredConnections();
+  const existingConnections = await getStoredConnections(userId);
   const aiConfig = getAIClientAndModel();
 
   if (!aiConfig) {
@@ -997,7 +1158,7 @@ export async function discoverCrossDocumentConnections(
       ],
       createdAt: new Date().toISOString(),
     };
-    saveStoredConnections([fallbackConn, ...existingConnections]);
+    await saveStoredConnections([fallbackConn]);
     return [fallbackConn, ...existingConnections];
   }
 
@@ -1068,31 +1229,7 @@ STRICT JSON OUTPUT FORMAT:
     }
 
     if (newConnections.length > 0) {
-      saveStoredConnections([...newConnections, ...existingConnections]);
-
-      // Supabase async sync
-      try {
-        const admin = createAdminClient();
-        (async () => {
-          try {
-            const inserts = newConnections.map(nc => ({
-              id: nc.id,
-              user_id: nc.userId,
-              subject_id: nc.subjectId,
-              title: nc.title,
-              connection_type: nc.connectionType,
-              description: nc.description,
-              source_document_name: nc.sourceDocumentName,
-              target_document_name: nc.targetDocumentName,
-              source_chunk_snippet: nc.sourceChunkSnippet,
-              target_chunk_snippet: nc.targetChunkSnippet,
-              citations: nc.citations,
-            }));
-            await admin.from('knowledge_connections').insert(inserts);
-          } catch (e) {}
-        })();
-      } catch (e) {}
-
+      await saveStoredConnections(newConnections);
       return [...newConnections, ...existingConnections];
     }
   } catch (err) {
@@ -1179,29 +1316,8 @@ Output ONLY the question text without any greetings or meta-commentary.`;
     }
   }
 
-  const sessions = getStoredVivaSessions();
-  saveStoredVivaSessions([session, ...sessions]);
-
-  // Sync to Supabase
-  try {
-    const admin = createAdminClient();
-    (async () => {
-      try {
-        await admin.from('viva_sessions').insert({
-          id: session.id,
-          user_id: session.userId,
-          subject_id: session.subjectId,
-          deck_id: session.deckId,
-          document_id: session.documentId,
-          title: session.topicTitle,
-          viva_mode: session.vivaMode,
-          difficulty: session.difficulty,
-          total_questions: session.totalQuestions,
-          status: session.status,
-        });
-      } catch (e) {}
-    })();
-  } catch (e) {}
+  const sessions = await getStoredVivaSessions(userId);
+  await saveStoredVivaSessions([session, ...sessions]);
 
   return { session, firstQuestion };
 }
@@ -1234,7 +1350,7 @@ export async function evaluateVivaTurn(params: EvaluateVivaTurnParams): Promise<
 }> {
   const { sessionId, userId, questionIndex, questionText, studentResponse, isVoice = false } = params;
 
-  const sessions = getStoredVivaSessions();
+  const sessions = await getStoredVivaSessions(userId);
   const sessionIdx = sessions.findIndex(s => s.id === sessionId && (s.userId === userId || s.userId === 'shared'));
   if (sessionIdx === -1) {
     throw new Error('Viva session not found or unauthorized.');
@@ -1289,7 +1405,7 @@ STRICT JSON OUTPUT:
   }
 
   // Persist response turn
-  const responses = getStoredVivaResponses();
+  const responses = await getStoredVivaResponses(sessionId);
   const newResponse: VivaResponse = {
     id: uuidv4(),
     sessionId,
@@ -1303,7 +1419,7 @@ STRICT JSON OUTPUT:
     followUpQuestion,
     createdAt: new Date().toISOString(),
   };
-  saveStoredVivaResponses([...responses, newResponse]);
+  await saveStoredVivaResponses([...responses, newResponse]);
 
   const isComplete = questionIndex >= session.totalQuestions;
   session.currentQuestionIndex = questionIndex + 1;
@@ -1348,43 +1464,10 @@ STRICT JSON OUTPUT:
     session.evaluationSummary = finalSummary;
 
     // Record as practice attempt for adaptive engine
-    recordAdaptiveAttempt(userId, session.topicTitle, overallScorePercent, 100, 'quiz', session.subjectId);
+    await recordAdaptiveAttempt(userId, session.topicTitle, overallScorePercent, 100, 'quiz', session.subjectId);
   }
 
-  saveStoredVivaSessions(sessions);
-
-  // Sync turn to Supabase
-  try {
-    const admin = createAdminClient();
-    (async () => {
-      try {
-        await admin.from('viva_responses').insert({
-          id: newResponse.id,
-          session_id: newResponse.sessionId,
-          user_id: newResponse.userId,
-          question_index: newResponse.questionIndex,
-          question_text: newResponse.questionText,
-          student_response: newResponse.studentResponse,
-          is_voice: newResponse.isVoice,
-          score: newResponse.score,
-          feedback: newResponse.feedback,
-          follow_up_question: newResponse.followUpQuestion,
-        });
-
-        if (isComplete) {
-          await admin.from('viva_sessions').update({
-            status: 'completed',
-            overall_score: session.overallScore,
-            accuracy_score: session.accuracyScore,
-            depth_score: session.depthScore,
-            clarity_score: session.clarityScore,
-            evaluation_summary: session.evaluationSummary,
-            completed_at: session.completedAt,
-          }).eq('id', sessionId);
-        }
-      } catch (e) {}
-    })();
-  } catch (e) {}
+  await saveStoredVivaSessions([session]);
 
   return {
     evaluation: {
@@ -1397,19 +1480,20 @@ STRICT JSON OUTPUT:
   };
 }
 
-export function getUserVivaHistory(userId: string): VivaSession[] {
-  return getStoredVivaSessions().filter(s => s.userId === userId || s.userId === 'shared');
+export async function getUserVivaHistory(userId: string): Promise<VivaSession[]> {
+  const sessions = await getStoredVivaSessions(userId);
+  return sessions.filter(s => s.userId === userId || s.userId === 'shared');
 }
 
-export function getVivaSessionDetails(sessionId: string, userId: string): {
+export async function getVivaSessionDetails(sessionId: string, userId: string): Promise<{
   session: VivaSession;
   responses: VivaResponse[];
-} | null {
-  const session = getStoredVivaSessions().find(s => s.id === sessionId && (s.userId === userId || s.userId === 'shared'));
+} | null> {
+  const sessions = await getStoredVivaSessions(userId);
+  const session = sessions.find(s => s.id === sessionId && (s.userId === userId || s.userId === 'shared'));
   if (!session) return null;
-  const responses = getStoredVivaResponses()
-    .filter(r => r.sessionId === sessionId)
-    .sort((a, b) => a.questionIndex - b.questionIndex);
+  const responses = await getStoredVivaResponses(sessionId);
+  responses.sort((a, b) => a.questionIndex - b.questionIndex);
   return { session, responses };
 }
 
@@ -1417,11 +1501,13 @@ export function getVivaSessionDetails(sessionId: string, userId: string): {
 // 8. UNIFIED AI LEARNING PROFILE
 // ============================================================================
 
-export function getUnifiedLearningProfile(userId: string): UnifiedLearningProfile {
-  const streak = calculateStreaks(userId);
-  const paths = getUserStudyPaths(userId);
-  const weakTopics = detectWeakTopics(userId);
-  const vivas = getUserVivaHistory(userId);
+export async function getUnifiedLearningProfile(userId: string): Promise<UnifiedLearningProfile> {
+  const [streak, paths, weakTopics, vivas] = await Promise.all([
+    calculateStreaks(userId),
+    getUserStudyPaths(userId),
+    detectWeakTopics(userId),
+    getUserVivaHistory(userId),
+  ]);
   const completedVivas = vivas.filter(v => v.status === 'completed' && typeof v.overallScore === 'number');
 
   const avgViva = completedVivas.length > 0
@@ -1484,19 +1570,25 @@ export function getUnifiedLearningProfile(userId: string): UnifiedLearningProfil
 /**
  * Purges all intelligence study paths, tasks, adaptive profiles, and viva sessions for a user (GDPR / account deletion).
  */
-export function purgeUserIntelligenceData(userId: string): void {
-  const paths = getStoredPaths().filter((p) => p.userId !== userId);
-  saveStoredPaths(paths);
+export async function purgeUserIntelligenceData(userId: string): Promise<void> {
+  demoIntelPaths = demoIntelPaths.filter((p) => p.userId !== userId);
+  demoIntelTasks = demoIntelTasks.filter((t) => t.userId !== userId);
+  demoIntelAdaptive = demoIntelAdaptive.filter((a) => a.userId !== userId);
+  demoIntelVivaSessions = demoIntelVivaSessions.filter((v) => v.userId !== userId);
+  demoIntelVivaResponses = demoIntelVivaResponses.filter((r) => r.userId !== userId);
+  demoIntelConnections = demoIntelConnections.filter((c) => c.userId !== userId);
 
-  const tasks = getStoredTasks().filter((t) => t.userId !== userId);
-  saveStoredTasks(tasks);
-
-  const adaptive = getStoredAdaptiveProfiles().filter((a) => a.userId !== userId);
-  saveStoredAdaptiveProfiles(adaptive);
-
-  const viva = getStoredVivaSessions().filter((v) => v.userId !== userId);
-  saveStoredVivaSessions(viva);
-
-  const responses = getStoredVivaResponses().filter((r) => r.userId !== userId);
-  saveStoredVivaResponses(responses);
+  try {
+    const admin = createAdminClient();
+    await Promise.allSettled([
+      admin.from('learning_path_tasks').delete().eq('user_id', userId),
+      admin.from('learning_paths').delete().eq('user_id', userId),
+      admin.from('adaptive_learning_profiles').delete().eq('user_id', userId),
+      admin.from('knowledge_connections').delete().eq('user_id', userId),
+      admin.from('viva_responses').delete().eq('user_id', userId),
+      admin.from('viva_sessions').delete().eq('user_id', userId),
+    ]);
+  } catch (err) {
+    console.warn('[purgeUserIntelligenceData] Supabase error:', err);
+  }
 }
