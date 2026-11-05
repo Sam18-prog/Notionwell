@@ -50,6 +50,8 @@ export interface Flashcard {
   correctReviewCount?: number;
   lastReviewedDate?: string | null;
   isWeakTopicReviewed?: boolean;
+  sourceQuote?: string;
+  sourceReference?: string;
 }
 
 export interface QuizQuestion {
@@ -59,6 +61,8 @@ export interface QuizQuestion {
   correctAnswer: string;
   explanation: string;
   topic: string;
+  sourceQuote?: string;
+  sourceReference?: string;
 }
 
 export interface DeckSource {
@@ -95,6 +99,7 @@ export interface SessionLog {
   mediumCount: number;
   hardCount: number;
   durationSeconds: number;
+  sessionType?: 'study' | 'quiz' | 'exam';
 }
 
 export interface PlannerTask {
@@ -421,55 +426,99 @@ export function getTodayDateString(): string {
 
 export function updateFlashcardSM2(
   card: Flashcard,
-  rating: 'easy' | 'medium' | 'hard'
+  rating: 'easy' | 'medium' | 'hard' | 'again' | 'good'
 ): Flashcard {
-  let newInterval = card.intervalDays || 0;
-  let newTimesIncorrect = card.timesIncorrect || 0;
+  let ef = (card as any).easinessFactor || 2.5;
+  let interval = card.intervalDays || 0;
+  let repCount = (card as any).repetitionCount || 0;
+  let timesIncorrect = card.timesIncorrect || 0;
   let correctCount = card.correctReviewCount || 0;
   let weakTopicReviewed = card.isWeakTopicReviewed || false;
 
-  if (rating === 'easy') {
-    const doubled = Math.max(1, newInterval * 2);
-    newInterval = Math.max(3, doubled);
-    correctCount += 1;
-  } else if (rating === 'medium') {
-    newInterval = newInterval + 1;
-    correctCount += 1;
+  let q: number;
+  if (rating === 'again') {
+    q = 1;
   } else if (rating === 'hard') {
-    newInterval = 0;
-    newTimesIncorrect += 1;
+    q = 3;
+  } else if (rating === 'medium' || rating === 'good') {
+    q = 4;
+  } else if (rating === 'easy') {
+    q = 5;
+  } else {
+    q = 4;
+  }
+
+  if (q < 3) {
+    // Lapse (Again)
+    repCount = 0;
+    interval = 1;
+    timesIncorrect += 1;
     weakTopicReviewed = false;
+    ef = Math.max(1.3, ef - 0.2);
+  } else {
+    correctCount += 1;
+    if (q === 3) {
+      // Hard: small interval step
+      interval = Math.max(1, Math.round((interval || 1) * 1.2));
+      ef = Math.max(1.3, ef - 0.15);
+    } else if (q === 4) {
+      // Good: standard SM-2 intervals (1 -> 6 -> interval * EF)
+      if (repCount === 0) {
+        interval = 1;
+      } else if (repCount === 1) {
+        interval = 6;
+      } else {
+        interval = Math.max(1, Math.round(interval * ef));
+      }
+      repCount += 1;
+      ef = ef + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
+      ef = Math.max(1.3, Math.min(3.0, ef));
+    } else {
+      // Easy: accelerated interval jump
+      if (repCount === 0) {
+        interval = 3;
+      } else if (repCount === 1) {
+        interval = 8;
+      } else {
+        interval = Math.max(1, Math.round(interval * ef * 1.3));
+      }
+      repCount += 1;
+      ef = Math.min(3.0, ef + 0.15);
+    }
   }
 
   const reviewDateObj = new Date();
-  reviewDateObj.setDate(reviewDateObj.getDate() + newInterval);
+  reviewDateObj.setDate(reviewDateObj.getDate() + interval);
   const year = reviewDateObj.getFullYear();
   const month = String(reviewDateObj.getMonth() + 1).padStart(2, '0');
   const day = String(reviewDateObj.getDate()).padStart(2, '0');
   const nextReviewDate = `${year}-${month}-${day}`;
 
-  const currentLevel = card.masteryLevel || 'new';
   let nextLevel: 'new' | 'learning' | 'mastered' = 'learning';
-  if (correctCount >= 3) {
+  if (repCount >= 3) {
     nextLevel = 'mastered';
-  } else if (currentLevel === 'new' || card.timesReviewed === 0) {
-    nextLevel = 'learning';
+  } else if (repCount === 0 && (card.timesReviewed || 0) === 0) {
+    nextLevel = 'new';
   } else {
     nextLevel = 'learning';
   }
 
-  return {
+  const result: Flashcard = {
     ...card,
-    difficulty: rating,
-    intervalDays: newInterval,
+    difficulty: rating === 'again' || rating === 'hard' ? 'hard' : rating === 'easy' ? 'easy' : 'medium',
+    intervalDays: interval,
     nextReviewDate,
     timesReviewed: (card.timesReviewed || 0) + 1,
-    timesIncorrect: newTimesIncorrect,
+    timesIncorrect,
     correctReviewCount: correctCount,
     masteryLevel: nextLevel,
     lastReviewedDate: new Date().toISOString(),
     isWeakTopicReviewed: weakTopicReviewed,
   };
+  (result as any).easinessFactor = Math.round(ef * 100) / 100;
+  (result as any).repetitionCount = repCount;
+
+  return result;
 }
 
 // ============================================================================
@@ -814,6 +863,63 @@ export function getDecksBySubject(subjectId: string): Deck[] {
   return getDecks().filter((d) => d.subjectId === subjectId);
 }
 
+export interface DeckDueReviewItem {
+  deck: Deck;
+  dueCount: number;
+  totalCards: number;
+  nextReviewDate: string;
+}
+
+export function getDecksDueForReview(limit: number = 4): DeckDueReviewItem[] {
+  const decks = getDecks();
+  const today = getTodayDateString();
+  const result: DeckDueReviewItem[] = [];
+
+  for (const deck of decks) {
+    if (!deck.flashcards || deck.flashcards.length === 0) continue;
+    const dueCards = deck.flashcards.filter((c) => c.nextReviewDate <= today);
+    let earliest = deck.flashcards[0]?.nextReviewDate || today;
+    for (const c of deck.flashcards) {
+      if (c.nextReviewDate < earliest) earliest = c.nextReviewDate;
+    }
+    result.push({
+      deck,
+      dueCount: dueCards.length,
+      totalCards: deck.flashcards.length,
+      nextReviewDate: earliest,
+    });
+  }
+
+  // Sort by cards due today first, then earliest review date
+  result.sort((a, b) => b.dueCount - a.dueCount || a.nextReviewDate.localeCompare(b.nextReviewDate));
+  return result.slice(0, limit);
+}
+
+export function getQuizzesCompletedCount(): number {
+  if (!isBrowser()) return 0;
+  try {
+    const logs = getSessionLogs();
+    const fromLogs = logs.filter((l) => l.sessionType === 'quiz').length;
+    const rawCount = localStorage.getItem('notionwell_quiz_completions_count');
+    const storedCount = rawCount ? parseInt(rawCount, 10) : 0;
+    return Math.max(fromLogs, storedCount);
+  } catch {
+    return 0;
+  }
+}
+
+export function incrementQuizzesCompleted(): number {
+  if (!isBrowser()) return 0;
+  try {
+    const current = getQuizzesCompletedCount();
+    const next = current + 1;
+    localStorage.setItem('notionwell_quiz_completions_count', String(next));
+    return next;
+  } catch {
+    return 0;
+  }
+}
+
 export function getDeckById(id: string): Deck | null {
   return getDecks().find((d) => d.id === id) || null;
 }
@@ -954,6 +1060,19 @@ export function moveDeckToSubject(deckId: string, newSubjectId: string): Deck | 
   return updatedDeck;
 }
 
+export function renameDeck(deckId: string, newName: string): Deck | null {
+  const deck = getDeckById(deckId);
+  if (!deck) return null;
+
+  const updatedDeck: Deck = {
+    ...deck,
+    name: newName.trim(),
+  };
+
+  saveDeck(updatedDeck);
+  return updatedDeck;
+}
+
 export function deleteDeck(id: string): void {
   const decks = getDecks().filter((d) => d.id !== id);
   cachedDecks = decks;
@@ -993,7 +1112,7 @@ export function toggleFlashcardBookmark(deckId: string, cardId: string): boolean
 export function updateFlashcardRating(
   deckId: string,
   cardId: string,
-  rating: 'easy' | 'medium' | 'hard'
+  rating: 'easy' | 'medium' | 'hard' | 'again' | 'good'
 ): Flashcard | null {
   const deck = getDeckById(deckId);
   if (!deck) return null;
@@ -1282,7 +1401,10 @@ export interface DashboardPrimaryRecommendation {
 }
 
 export interface DashboardMetrics {
+  totalDecks?: number;
   totalCards: number;
+  totalFlashcards?: number;
+  quizzesCompleted?: number;
   easyCards?: number;
   masteredCards: number;
   masteryPercentage: number;
@@ -1412,9 +1534,13 @@ export function getDashboardMetrics(subjectId?: string): DashboardMetrics {
   }
 
   const stats = getStats();
+  const quizzesCompleted = getQuizzesCompletedCount();
 
   return {
+    totalDecks: decks.length,
     totalCards,
+    totalFlashcards: totalCards,
+    quizzesCompleted,
     easyCards: masteredCards,
     masteredCards,
     masteryPercentage,
@@ -1516,18 +1642,47 @@ function notifyAuthChange() {
 export function getCurrentUser(): User | null {
   if (!isBrowser()) return null;
 
+  // 1. Supabase Authenticated User (Highest priority)
+  try {
+    const rawSbUser = localStorage.getItem('notionwell_user_v1');
+    if (rawSbUser) {
+      const parsed = JSON.parse(rawSbUser);
+      if (parsed && parsed.id && parsed.email) {
+        return {
+          id: parsed.id,
+          name: parsed.name || parsed.email.split('@')[0] || 'Student',
+          email: parsed.email,
+          createdAt: parsed.createdAt || new Date().toISOString(),
+        };
+      }
+    }
+  } catch {}
+
+  // 2. Demo guest session check
+  if (typeof document !== 'undefined' && document.cookie.includes('notionwell_demo_session=1')) {
+    return {
+      id: 'demo-guest-user',
+      name: 'Demo Student',
+      email: 'demo@notionwell.ai',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+  }
+
+  // 3. Fallback local session
   const session = getSession();
-  if (!session.isLoggedIn) return null;
+  if (session.isLoggedIn) {
+    const account = getStoredAccount();
+    if (account) {
+      return {
+        id: 'local-user-1',
+        name: account.name || 'Student',
+        email: account.email || 'student@notionwell.ai',
+        createdAt: account.createdAt || new Date().toISOString(),
+      };
+    }
+  }
 
-  const account = getStoredAccount();
-  if (!account) return null;
-
-  return {
-    id: 'local-user-1',
-    name: account.name || 'Student',
-    email: account.email || 'student@notionwell.ai',
-    createdAt: account.createdAt || new Date().toISOString(),
-  };
+  return null;
 }
 
 export async function signupUser(
@@ -1670,6 +1825,20 @@ export function logoutUser(): void {
   if (!isBrowser()) return;
   try {
     saveSession({ isLoggedIn: false, loggedInEmail: null });
+    localStorage.removeItem('notionwell_user_v1');
+    // Clear demo session cookie
+    document.cookie = 'notionwell_demo_session=; path=/; max-age=0; SameSite=Lax';
+    
+    // Sign out from Supabase if configured
+    if (typeof window !== 'undefined') {
+      import('@/lib/supabase/client').then(({ isSupabaseConfigured, createClient }) => {
+        if (isSupabaseConfigured()) {
+          const supabase = createClient();
+          supabase.auth.signOut().catch((e) => console.warn('Supabase signOut error:', e));
+        }
+      }).catch(() => {});
+    }
+    
     notifyAuthChange();
   } catch (err) {
     console.error('Logout error:', err);
@@ -1789,8 +1958,9 @@ export async function extractTextWithVisionOcr(
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 45000);
 
+      const activeModel = process.env.AI_MODEL || 'gemini-3.5-flash';
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${process.env.AI_MODEL || 'gemini-3.5-flash'}:generateContent?key=${geminiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${geminiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2590,6 +2760,8 @@ RETURN ONLY VALID JSON — NO MARKDOWN, NO EXPLANATION TEXT
         correctReviewCount: 0,
         lastReviewedDate: null,
         isWeakTopicReviewed: false,
+        sourceQuote: item.source_quote?.trim() || undefined,
+        sourceReference: item.topic || 'Source Document',
       }));
   }
 
@@ -2650,6 +2822,8 @@ RETURN ONLY VALID JSON — NO MARKDOWN, NO EXPLANATION TEXT
           correctAnswer,
           explanation: formatConciseSentence(item.explanation || 'Based on document content.', 35),
           topic: item.topic && item.topic !== 'General' ? item.topic.trim() : (item.concept_tested?.trim() || 'General'),
+          sourceQuote: item.source_quote?.trim() || undefined,
+          sourceReference: item.topic || 'Source Document',
         };
       });
 

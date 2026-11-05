@@ -134,9 +134,9 @@ Transcribe and extract ALL readable text, headings, bullet points, numbered list
 Output ONLY the clean transcribed study text. Do not invent metadata or summaries.`;
 
   const visionModels = [
-    process.env.AI_MODEL || 'gemini-3.5-flash',
+    process.env.AI_MODEL || 'gemini-2.5-flash',
+    'gemini-flash-latest',
     'gemini-flash-lite-latest',
-    'gemini-flash-latest'
   ];
 
   for (const model of visionModels) {
@@ -195,8 +195,9 @@ export async function pass2ContextualVerification(rawTranscription: string): Pro
   }
 
   try {
+    const activeModel = process.env.AI_MODEL || 'gemini-2.5-flash';
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${process.env.AI_MODEL || 'gemini-3.5-flash'}:generateContent?key=${geminiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${geminiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -320,6 +321,65 @@ export function extractRawPdfStreamFallback(buffer: Buffer): string {
   return Array.from(new Set(textParts)).join(' ').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Converts DOCX documents to structure-preserving Markdown text.
+ * Preserves headings (# Heading), Markdown tables, and lists.
+ */
+export async function convertDocxToStructuredText(buffer: Buffer): Promise<string> {
+  try {
+    const mammoth = require('mammoth');
+    const htmlResult = await mammoth.convertToHtml({ buffer });
+    const html = htmlResult.value || '';
+    if (!html || html.trim().length < 20) {
+      const rawResult = await mammoth.extractRawText({ buffer });
+      return rawResult.value || '';
+    }
+
+    // Convert HTML structure to Markdown
+    let md = html
+      .replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, (_: string, p: string) => '\n\n# ' + p.replace(/<[^>]+>/g, '').trim() + '\n\n')
+      .replace(/<h2[^>]*>([\s\S]*?)<\/h2>/gi, (_: string, p: string) => '\n\n## ' + p.replace(/<[^>]+>/g, '').trim() + '\n\n')
+      .replace(/<h3[^>]*>([\s\S]*?)<\/h3>/gi, (_: string, p: string) => '\n\n### ' + p.replace(/<[^>]+>/g, '').trim() + '\n\n')
+      .replace(/<h[4-6][^>]*>([\s\S]*?)<\/h[4-6]>/gi, (_: string, p: string) => '\n\n#### ' + p.replace(/<[^>]+>/g, '').trim() + '\n\n')
+      .replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_: string, p: string) => '\n\n' + p.replace(/<[^>]+>/g, '').trim() + '\n\n')
+      .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_: string, p: string) => '\n* ' + p.replace(/<[^>]+>/g, '').trim())
+      .replace(/<tr[^>]*>([\s\S]*?)<\/tr>/gi, (_: string, row: string) => {
+        const cells: string[] = [];
+        const cellRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+        let c: RegExpExecArray | null;
+        while ((c = cellRegex.exec(row)) !== null) {
+          cells.push(c[1].replace(/<[^>]+>/g, '').trim());
+        }
+        return cells.length > 0 ? '| ' + cells.join(' | ') + ' |\n' : '';
+      })
+      .replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (_: string, tableContent: string) => {
+        const rows = tableContent.split('\n').filter((r: string) => r.trim().startsWith('|'));
+        if (rows.length === 0) return '';
+        const colCount = (rows[0].match(/\|/g) || []).length - 1;
+        const separator = '| ' + Array(colCount).fill('---').join(' | ') + ' |';
+        return '\n\n' + rows[0] + '\n' + separator + '\n' + rows.slice(1).join('\n') + '\n\n';
+      })
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    return md;
+  } catch (err) {
+    console.warn('[DOCX Extraction Error]: Falling back to raw text extraction:', err);
+    try {
+      const mammoth = require('mammoth');
+      const raw = await mammoth.extractRawText({ buffer });
+      return raw.value || '';
+    } catch {
+      return '';
+    }
+  }
+}
+
 export async function processDocumentMultimodal(
   buffer: Buffer,
   fileType: string,
@@ -347,13 +407,7 @@ export async function processDocumentMultimodal(
     }
   } else if (lowerName.endsWith('.docx')) {
     sourceType = 'docx';
-    try {
-      const mammoth = require('mammoth');
-      const res = await mammoth.extractRawText({ buffer });
-      nativeText = res.value || '';
-    } catch (e) {
-      nativeText = '';
-    }
+    nativeText = await convertDocxToStructuredText(buffer);
   } else if (lowerName.endsWith('.txt')) {
     sourceType = 'text';
     nativeText = buffer.toString('utf-8');

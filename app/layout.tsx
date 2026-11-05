@@ -1,11 +1,63 @@
 import type { Metadata } from 'next';
+import { Inter, Outfit } from 'next/font/google';
 import './globals.css';
 import Sidebar from '@/components/Sidebar';
 import BadgeToast from '@/components/BadgeToast';
+import SupabaseAuthSync from '@/components/SupabaseAuthSync';
+
+const inter = Inter({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-sans',
+});
+
+const outfit = Outfit({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-heading',
+});
 
 export const metadata: Metadata = {
-  title: 'Notionwell — Intelligent Spaced Repetition & Quiz Assistant',
-  description: 'AI-powered flashcard and quiz generator with SM-2 spaced repetition for effective learning.',
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://notionwell.vercel.app'),
+  title: {
+    default: 'Notionwell — From Notes to Knowledge | AI Study Platform',
+    template: '%s | Notionwell',
+  },
+  description: 'AI-powered learning platform with multimodal document extraction, pgvector RAG study assistant, SM-2 spaced repetition, realistic exam simulation, and viva voce preparation.',
+  keywords: [
+    'AI study assistant',
+    'spaced repetition',
+    'SM-2 flashcards',
+    'RAG learning',
+    'exam simulator',
+    'viva voce practice',
+    'active recall',
+    'college study tool',
+  ],
+  authors: [{ name: 'Notionwell Team' }],
+  creator: 'Notionwell',
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    url: 'https://notionwell.vercel.app',
+    title: 'Notionwell — From Notes to Knowledge',
+    description: 'Transform lecture notes and textbooks into interactive flashcards, practice quizzes, AI exams, and oral viva prep with grounded citations.',
+    siteName: 'Notionwell',
+    images: [
+      {
+        url: '/logo.png',
+        width: 512,
+        height: 512,
+        alt: 'Notionwell Logo',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary',
+    title: 'Notionwell — From Notes to Knowledge',
+    description: 'AI-powered study platform with RAG assistant, exam simulation, and SM-2 spaced repetition.',
+    images: ['/logo.png'],
+  },
   icons: {
     icon: [
       { url: '/favicon.ico' },
@@ -34,12 +86,6 @@ export default function RootLayout({
         <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
         <link rel="manifest" href="/site.webmanifest" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap"
-          rel="stylesheet"
-        />
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -57,7 +103,8 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="bg-[#F6F8FC] dark:bg-[#0B1220] text-[#0F172A] dark:text-[#F8FAFC] min-h-screen transition-colors duration-200">
+      <body className={`${inter.variable} ${outfit.variable} font-sans bg-[#F6F8FC] dark:bg-[#0B1220] text-[#0F172A] dark:text-[#F8FAFC] min-h-screen transition-colors duration-200`}>
+        <SupabaseAuthSync />
         <div className="min-h-screen flex flex-col lg:flex-row">
           {/* REUSABLE COLLAPSIBLE SIDEBAR */}
           <Sidebar />

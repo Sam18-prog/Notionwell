@@ -1,7 +1,7 @@
-import { jsPDF } from 'jspdf';
 import { Deck } from '@/lib/app';
 
-export function exportDeckToPDF(deck: Deck, subjectName?: string): void {
+export async function exportDeckToPDF(deck: Deck, subjectName?: string): Promise<void> {
+  const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',

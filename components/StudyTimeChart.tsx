@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { getDailyStudyTimeLastNDays } from '@/lib/app';
 import { Clock } from 'lucide-react';
 
-export default function StudyTimeChart({ detailed = false }: { detailed?: boolean }) {
+const StudyTimeChart = React.memo(function StudyTimeChart({ detailed = false }: { detailed?: boolean }) {
   const [data, setData] = useState<
     Array<{
       dateStr: string;
@@ -109,4 +109,6 @@ export default function StudyTimeChart({ detailed = false }: { detailed?: boolea
       </div>
     </div>
   );
-}
+});
+
+export default StudyTimeChart;

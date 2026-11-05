@@ -2,6 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-c';
 import 'prismjs/components/prism-java';
@@ -16,7 +19,7 @@ interface MarkdownRendererProps {
   className?: string;
 }
 
-export default function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
+const MarkdownRenderer = React.memo(function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   useEffect(() => {
@@ -32,7 +35,41 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
   return (
     <div className={`prose dark:prose-invert max-w-none text-left leading-relaxed ${className}`}>
       <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
         components={{
+          table: ({ children }) => (
+            <div className="overflow-x-auto my-4 rounded-xl border border-[#E2E8F0] dark:border-[#263449]">
+              <table className="min-w-full divide-y divide-[#E2E8F0] dark:divide-[#263449] text-xs sm:text-sm">
+                {children}
+              </table>
+            </div>
+          ),
+          thead: ({ children }) => (
+            <thead className="bg-[#F8FAFC] dark:bg-[#1E293B] text-[#0F172A] dark:text-[#F8FAFC] font-bold">
+              {children}
+            </thead>
+          ),
+          tbody: ({ children }) => (
+            <tbody className="divide-y divide-[#E2E8F0] dark:divide-[#263449] bg-white dark:bg-[#111827]">
+              {children}
+            </tbody>
+          ),
+          tr: ({ children }) => (
+            <tr className="hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B]/50 transition-colors">
+              {children}
+            </tr>
+          ),
+          th: ({ children }) => (
+            <th className="px-3 py-2 text-left font-semibold text-[#0F172A] dark:text-[#F8FAFC]">
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td className="px-3 py-2 text-[#334155] dark:text-[#CBD5E1]">
+              {children}
+            </td>
+          ),
           code({ node, inline, className: codeClassName, children, ...props }: any) {
             const match = /language-(\w+)/.exec(codeClassName || '');
             const language = match ? match[1] : '';
@@ -115,4 +152,6 @@ export default function MarkdownRenderer({ content, className = '' }: MarkdownRe
       </ReactMarkdown>
     </div>
   );
-}
+});
+
+export default MarkdownRenderer;

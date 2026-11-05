@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import {
   Atom,
   Calculator,
@@ -22,7 +23,7 @@ interface SubjectIconProps {
   className?: string;
 }
 
-export default function SubjectIcon({ iconName, name, className = 'w-6 h-6' }: SubjectIconProps) {
+const SubjectIcon = React.memo(function SubjectIcon({ iconName, name, className = 'w-6 h-6' }: SubjectIconProps) {
   const resolvedIcon = iconName || (name ? detectSubjectIcon(name) : 'Folder');
 
   switch (resolvedIcon) {
@@ -52,4 +53,6 @@ export default function SubjectIcon({ iconName, name, className = 'w-6 h-6' }: S
     default:
       return <Folder className={className} />;
   }
-}
+});
+
+export default SubjectIcon;

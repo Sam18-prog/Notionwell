@@ -25,6 +25,13 @@ export async function POST(req: NextRequest) {
         const rawTextInput = formData.get('text') as string | null;
 
         if (file) {
+          const MAX_UPLOAD_BYTES = 15 * 1024 * 1024; // 15MB limit
+          if (file.size > MAX_UPLOAD_BYTES) {
+            return NextResponse.json(
+              { error: 'File size exceeds maximum allowable limit of 15MB.' },
+              { status: 413 }
+            );
+          }
           const arrayBuffer = await file.arrayBuffer();
           const buffer = Buffer.from(arrayBuffer);
           const fileName = file.name;

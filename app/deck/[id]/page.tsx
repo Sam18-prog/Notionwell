@@ -19,6 +19,8 @@ import {
   getStats,
   saveStudyTimeLog,
   getTodayDateString,
+  incrementQuizzesCompleted,
+  getCurrentUser,
   Deck,
   Flashcard,
   QuizQuestion,
@@ -57,6 +59,7 @@ import {
   pauseGlobalTimer,
 } from '@/lib/timer';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
+import DeckDetailLoading from './loading';
 
 export default function DeckDetailPage() {
   const params = useParams();
@@ -207,6 +210,7 @@ export default function DeckDetailPage() {
       mediumCount: mediumCount || cardsReviewedCount,
       hardCount,
       durationSeconds: activeSecs,
+      sessionType: 'study',
     };
 
     saveSessionLog(log);
@@ -270,7 +274,7 @@ export default function DeckDetailPage() {
   };
 
   const handleRateCard = useCallback(
-    (rating: 'easy' | 'medium' | 'hard') => {
+    (rating: 'easy' | 'medium' | 'hard' | 'again' | 'good') => {
       const currentCard = studyCards[currentCardIndex];
       if (!currentCard || !deck) return;
 
@@ -290,14 +294,26 @@ export default function DeckDetailPage() {
           );
           setStudyCards(updatedQueue);
         }
+
+        // Server-verified review log, XP transaction & streak tracking
+        fetch('/api/study/review/record', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deckId: deck.id,
+            cardId: currentCard.id,
+            response: rating,
+            durationMs: 15000,
+          }),
+        }).catch(() => {});
       } else {
         markCardsWeakTopicReviewed([{ deckId: currentCard.deckId, cardId: currentCard.id }]);
       }
 
       setCardsReviewedCount((prev) => prev + 1);
       if (rating === 'easy') setEasyCount((prev) => prev + 1);
-      if (rating === 'medium') setMediumCount((prev) => prev + 1);
-      if (rating === 'hard') setHardCount((prev) => prev + 1);
+      else if (rating === 'good' || rating === 'medium') setMediumCount((prev) => prev + 1);
+      else setHardCount((prev) => prev + 1);
 
       setIsFlipped(false);
       setEli5Explanation(null);
@@ -350,13 +366,13 @@ export default function DeckDetailPage() {
         setIsFlipped((prev) => !prev);
       } else if (e.key === '1') {
         e.preventDefault();
-        handleRateCard('hard');
+        handleRateCard('again');
       } else if (e.key === '2') {
         e.preventDefault();
         handleRateCard('hard');
       } else if (e.key === '3') {
         e.preventDefault();
-        handleRateCard('medium');
+        handleRateCard('good');
       } else if (e.key === '4') {
         e.preventDefault();
         handleRateCard('easy');
@@ -487,14 +503,32 @@ export default function DeckDetailPage() {
         mediumCount: 0,
         hardCount: quizQuestions.length - quizScore,
         durationSeconds: activeSecs,
+        sessionType: 'quiz',
       };
       saveSessionLog(log);
+      incrementQuizzesCompleted();
       saveStudyTimeLog({
         id: uuidv4(),
         date: getTodayDateString(),
         durationSeconds: activeSecs,
         startedAt: new Date().toISOString(),
       });
+
+      // Record verified quiz attempt for analytics & XP rewards
+      const user = getCurrentUser();
+      fetch('/api/study/quiz/record', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user?.id || 'default-user',
+          deckId: deck?.id,
+          deckName: deck?.name || 'Practice Quiz',
+          score: quizScore,
+          totalItems: quizQuestions.length,
+          durationSeconds: activeSecs,
+        }),
+      }).catch(() => {});
+
       setQuizCompleted(true);
     }
   };
@@ -596,8 +630,10 @@ export default function DeckDetailPage() {
       mediumCount: 0,
       hardCount: examItems.length - score,
       durationSeconds: activeSecs,
+      sessionType: 'exam',
     };
     saveSessionLog(log);
+    incrementQuizzesCompleted();
     saveStudyTimeLog({
       id: uuidv4(),
       date: getTodayDateString(),
@@ -609,7 +645,7 @@ export default function DeckDetailPage() {
     setExamSubmitted(true);
   };
 
-  if (!mounted) return null;
+  if (!mounted) return <DeckDetailLoading />;
 
   if (!deck) {
     return (
@@ -707,13 +743,16 @@ export default function DeckDetailPage() {
                 </button>
 
                 <button
-                  onClick={() => {
-                    if (!deck) return;
+                  onClick={async () => {
+                    if (!deck || isExportingPDF) return;
                     setIsExportingPDF(true);
-                    setTimeout(() => {
-                      exportDeckToPDF(deck, parentSubject?.name);
+                    try {
+                      await exportDeckToPDF(deck, parentSubject?.name);
+                    } catch (err) {
+                      console.error('Failed to export PDF:', err);
+                    } finally {
                       setIsExportingPDF(false);
-                    }, 100);
+                    }
                   }}
                   disabled={isExportingPDF}
                   className="px-3.5 py-1.5 rounded-xl bg-white dark:bg-[#172033] border border-[#E2E8F0] dark:border-[#263449] hover:border-[#2563EB] text-xs font-bold text-[#0F172A] dark:text-[#F8FAFC] flex items-center gap-1.5 transition-all shadow-xs"
@@ -960,6 +999,22 @@ export default function DeckDetailPage() {
                     <div className="my-auto text-left space-y-4 px-2 sm:px-4">
                       <MarkdownRenderer content={studyCards[currentCardIndex]?.answer || ''} />
 
+                      {/* SOURCE EVIDENCE / CITATION */}
+                      {studyCards[currentCardIndex]?.sourceQuote && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="bg-[#EFF6FF] dark:bg-[#172554]/50 border border-[#DBEAFE] dark:border-[#1E3A8A] rounded-2xl p-3 text-left text-xs space-y-1 shadow-xs"
+                        >
+                          <div className="flex items-center gap-1.5 text-[#2563EB] dark:text-[#60A5FA] font-bold text-[10px] uppercase tracking-wider">
+                            <BookOpen className="w-3.5 h-3.5" />
+                            <span>Source Evidence ({studyCards[currentCardIndex]?.sourceReference || 'Document'})</span>
+                          </div>
+                          <p className="text-[11px] text-[#334155] dark:text-[#93C5FD] italic leading-relaxed">
+                            &ldquo;{studyCards[currentCardIndex]?.sourceQuote}&rdquo;
+                          </p>
+                        </div>
+                      )}
+
                       {/* ELI5 SIMPLIFIER BUTTON */}
                       {!eli5Explanation && (
                         <button
@@ -994,8 +1049,48 @@ export default function DeckDetailPage() {
                       {eli5Error && <p className="text-xs text-[#EF4444]">{eli5Error}</p>}
                     </div>
 
-                    {/* REPOSISTIONED "NEXT →" AND SECONDARY "← PREVIOUS" BUTTON */}
-                    <div className="flex items-center justify-center gap-4">
+                    {/* SM-2 RECALL RATING BUTTONS */}
+                    <div className="space-y-2 pt-2 border-t border-[#E2E8F0] dark:border-[#263449]">
+                      <p className="text-[11px] font-bold text-[#64748B] dark:text-[#94A3B8] text-center">
+                        How well did you recall this answer? (Press 1–4)
+                      </p>
+                      <div className="grid grid-cols-4 gap-2">
+                        <button
+                          onClick={() => handleRateCard('again')}
+                          className="px-3 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 font-extrabold text-xs transition-all flex flex-col items-center shadow-xs hover:scale-[1.02]"
+                        >
+                          <span>Again</span>
+                          <span className="text-[9px] font-medium opacity-80">&lt; 1 day (1)</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleRateCard('hard')}
+                          className="px-3 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 font-extrabold text-xs transition-all flex flex-col items-center shadow-xs hover:scale-[1.02]"
+                        >
+                          <span>Hard</span>
+                          <span className="text-[9px] font-medium opacity-80">1.2x (2)</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleRateCard('good')}
+                          className="px-3 py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 font-extrabold text-xs transition-all flex flex-col items-center shadow-xs hover:scale-[1.02]"
+                        >
+                          <span>Good</span>
+                          <span className="text-[9px] font-medium opacity-80">SM-2 (3)</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleRateCard('easy')}
+                          className="px-3 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900 border border-blue-200 dark:border-blue-900 text-blue-700 dark:text-blue-300 font-extrabold text-xs transition-all flex flex-col items-center shadow-xs hover:scale-[1.02]"
+                        >
+                          <span>Easy</span>
+                          <span className="text-[9px] font-medium opacity-80">Fast (4)</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* REPOSITIONED "NEXT →" AND SECONDARY "← PREVIOUS" BUTTON */}
+                    <div className="flex items-center justify-center gap-4 pt-1">
                       {currentCardIndex > 0 && (
                         <button
                           onClick={handlePreviousCard}
@@ -1009,7 +1104,7 @@ export default function DeckDetailPage() {
                         onClick={handleAdvanceNext}
                         className="px-6 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] dark:bg-[#3B82F6] dark:hover:bg-[#60A5FA] text-white text-xs font-extrabold shadow-xs transition-all flex items-center gap-1.5 hover:scale-105"
                       >
-                        <span>Next</span>
+                        <span>Next Card</span>
                         <ArrowRight className="w-3.5 h-3.5 stroke-[3]" />
                       </button>
                     </div>
@@ -1139,14 +1234,25 @@ export default function DeckDetailPage() {
 
               {selectedOption !== null && (
                 <div className="space-y-4 pt-4 border-t border-[#E2E8F0] dark:border-[#263449]">
-                  <div className="bg-[#F8FAFC] dark:bg-[#172033] border border-[#E2E8F0] dark:border-[#263449] rounded-2xl p-4 space-y-1 text-xs">
-                    <p className="font-bold text-[#2563EB] dark:text-[#3B82F6] uppercase tracking-wider text-[10px]">
-                      Explanation
-                    </p>
-                    <p className="text-[#475569] dark:text-[#CBD5E1] leading-relaxed font-medium">
-                      {quizQuestions[currentQuizIndex]?.explanation}
-                    </p>
-                  </div>
+                    <div className="bg-[#F8FAFC] dark:bg-[#172033] border border-[#E2E8F0] dark:border-[#263449] rounded-2xl p-4 space-y-2 text-xs">
+                      <p className="font-bold text-[#2563EB] dark:text-[#3B82F6] uppercase tracking-wider text-[10px]">
+                        Explanation
+                      </p>
+                      <p className="text-[#475569] dark:text-[#CBD5E1] leading-relaxed font-medium">
+                        {quizQuestions[currentQuizIndex]?.explanation}
+                      </p>
+                      {quizQuestions[currentQuizIndex]?.sourceQuote && (
+                        <div className="pt-2 border-t border-[#E2E8F0] dark:border-[#263449] space-y-0.5">
+                          <p className="font-bold text-[#10B981] dark:text-[#34D399] uppercase tracking-wider text-[9px] flex items-center gap-1">
+                            <BookOpen className="w-3 h-3" />
+                            <span>Source Evidence ({quizQuestions[currentQuizIndex]?.sourceReference || 'Document'})</span>
+                          </p>
+                          <p className="text-[#334155] dark:text-[#CBD5E1] text-[11px] italic leading-relaxed">
+                            &ldquo;{quizQuestions[currentQuizIndex]?.sourceQuote}&rdquo;
+                          </p>
+                        </div>
+                      )}
+                    </div>
 
                   <div className="flex justify-end">
                     <button

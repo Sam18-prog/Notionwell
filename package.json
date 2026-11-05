@@ -9,9 +9,13 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0",
+    "@types/katex": "^0.16.8",
     "@types/prismjs": "^1.26.6",
     "clsx": "^2.1.1",
     "jspdf": "^4.2.1",
+    "katex": "^0.19.1",
     "lucide-react": "^0.428.0",
     "mammoth": "^1.8.0",
     "next": "^14.2.15",
@@ -21,6 +25,9 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "tailwind-merge": "^2.5.2",
     "uuid": "^10.0.0"
   },
@@ -33,6 +40,7 @@
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.41",
     "tailwindcss": "^3.4.10",
+    "tsx": "^4.23.15",
     "typescript": "^5.5.4"
   }
 }

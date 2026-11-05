@@ -32,6 +32,7 @@ import {
   BookMarked,
 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
+import PlannerLoading from './loading';
 
 export default function StudyPlannerPage() {
   const router = useRouter();
@@ -66,7 +67,7 @@ export default function StudyPlannerPage() {
     loadData();
   }, [router]);
 
-  if (!mounted) return null;
+  if (!mounted) return <PlannerLoading />;
 
   const todayStr = getTodayDateString();
   const year = currentDate.getFullYear();
@@ -147,13 +148,10 @@ export default function StudyPlannerPage() {
       {/* HEADER SECTION */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#E2E8F0] dark:border-[#263449] pb-6">
         <div>
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 text-xs text-[#475569] dark:text-[#CBD5E1] hover:text-[#0F172A] dark:hover:text-white mb-2 transition-colors font-bold"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            Back to Dashboard
-          </Link>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#EFF6FF] dark:bg-[#172554] border border-[#DBEAFE] dark:border-[#1E3A8A] text-[#2563EB] dark:text-[#60A5FA] text-xs font-semibold mb-2">
+            <CalendarIcon className="w-3.5 h-3.5" />
+            <span className="font-bold">Notionwell — From Notes to Knowledge</span>
+          </div>
           <h1 className="text-3xl font-extrabold text-[#0F172A] dark:text-[#F8FAFC] flex items-center gap-2">
             <CalendarIcon className="w-7 h-7 text-[#2563EB] dark:text-[#3B82F6]" />
             <span>Study Planner Calendar</span>

@@ -7,6 +7,7 @@ import {
   getSubjectById,
   getDecksBySubject,
   deleteDeck,
+  renameDeck,
   getCurrentUser,
   Subject,
   Deck,
@@ -32,6 +33,8 @@ import {
   Download,
   Paperclip,
   FolderInput,
+  Edit2,
+  X,
 } from 'lucide-react';
 
 export default function SubjectDetailPage() {
@@ -43,6 +46,8 @@ export default function SubjectDetailPage() {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [selectedSourcesDeck, setSelectedSourcesDeck] = useState<Deck | null>(null);
   const [movingDeck, setMovingDeck] = useState<Deck | null>(null);
+  const [renamingDeck, setRenamingDeck] = useState<Deck | null>(null);
+  const [newDeckTitle, setNewDeckTitle] = useState('');
   const [mounted, setMounted] = useState(false);
 
   const loadData = () => {
@@ -80,6 +85,19 @@ export default function SubjectDetailPage() {
       deleteDeck(id);
       loadData();
     }
+  };
+
+  const handleOpenRenameDeck = (deck: Deck) => {
+    setRenamingDeck(deck);
+    setNewDeckTitle(deck.name);
+  };
+
+  const handleSaveRenameDeck = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!renamingDeck || !newDeckTitle.trim()) return;
+    renameDeck(renamingDeck.id, newDeckTitle.trim());
+    setRenamingDeck(null);
+    loadData();
   };
 
   let totalCardsInSubject = 0;
@@ -206,6 +224,17 @@ export default function SubjectDetailPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          handleOpenRenameDeck(deck);
+                        }}
+                        className="text-[#64748B] hover:text-[#2563EB] p-1.5 rounded-xl hover:bg-[#EFF6FF] dark:hover:bg-[#172554] transition-colors"
+                        title="Rename Deck"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelectedSourcesDeck(deck);
                         }}
                         className="text-[#64748B] hover:text-[#2563EB] p-1.5 rounded-xl hover:bg-[#EFF6FF] dark:hover:bg-[#172554] transition-colors"
@@ -323,6 +352,64 @@ export default function SubjectDetailPage() {
           onClose={() => setMovingDeck(null)}
           onSuccess={() => loadData()}
         />
+      )}
+
+      {/* RENAME DECK MODAL */}
+      {renamingDeck && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-[#E2E8F0] dark:border-[#263449] pb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-[#EFF6FF] dark:bg-[#172554] text-[#2563EB] flex items-center justify-center">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <h3 className="font-extrabold text-lg text-[#0F172A] dark:text-[#F8FAFC]">
+                  Rename Study Deck
+                </h3>
+              </div>
+              <button
+                onClick={() => setRenamingDeck(null)}
+                className="text-[#64748B] hover:text-[#0F172A] dark:hover:text-white p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveRenameDeck} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-[#0F172A] dark:text-[#F8FAFC] mb-1">
+                  Deck Title
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newDeckTitle}
+                  onChange={(e) => setNewDeckTitle(e.target.value)}
+                  placeholder="Enter new deck name..."
+                  className="w-full bg-[#F8FAFC] dark:bg-[#172033] border border-[#E2E8F0] dark:border-[#263449] rounded-xl px-4 py-2.5 text-xs text-[#0F172A] dark:text-[#F8FAFC] font-semibold focus:outline-none focus:border-[#2563EB]"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#E2E8F0] dark:border-[#263449]">
+                <button
+                  type="button"
+                  onClick={() => setRenamingDeck(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-[#64748B] hover:bg-[#F1F5F9] dark:hover:bg-[#1E293B]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newDeckTitle.trim()}
+                  className="px-5 py-2 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-extrabold shadow-xs transition-all disabled:opacity-50"
+                >
+                  Save Title
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

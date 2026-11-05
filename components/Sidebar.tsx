@@ -6,16 +6,19 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   getCurrentUser,
   logoutUser,
-  resetAllAppData,
   getStoredTheme,
   setStoredTheme,
   User,
 } from '@/lib/app';
 import {
-  GraduationCap,
-  PlusCircle,
+  Sparkles,
   LayoutDashboard,
   Folder,
+  Layers,
+  HelpCircle,
+  Calendar,
+  BarChart3,
+  Settings,
   LogOut,
   Sun,
   Moon,
@@ -24,11 +27,17 @@ import {
   Menu,
   X,
   LogIn,
-  Calendar,
-  BarChart3,
-  AlertTriangle,
+  PlusCircle,
+  GraduationCap,
+  Bot,
+  RotateCw,
+  Route,
+  AlertCircle,
+  Network,
+  Mic,
 } from 'lucide-react';
 import Stopwatch from '@/components/Stopwatch';
+import SettingsModal from '@/components/SettingsModal';
 
 export default function Sidebar() {
   const router = useRouter();
@@ -38,12 +47,10 @@ export default function Sidebar() {
   const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
-  // Sidebar states
+  // Sidebar layout states
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-
-  // Reset Demo Data confirmation modal state
-  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -95,10 +102,64 @@ export default function Sidebar() {
       active: pathname === '/',
     },
     {
-      label: 'My Subject Decks',
+      label: 'AI Study Assistant',
+      href: '/assistant',
+      icon: Bot,
+      active: pathname.startsWith('/assistant'),
+    },
+    {
+      label: 'My Study Decks',
       href: '/decks',
       icon: Folder,
-      active: pathname.startsWith('/decks'),
+      active: pathname.startsWith('/decks') && !pathname.includes('tab=quiz') && !pathname.includes('tab=flashcards'),
+    },
+    {
+      label: 'Flashcards',
+      href: '/decks?tab=flashcards',
+      icon: Layers,
+      active: pathname.startsWith('/decks') && pathname.includes('tab=flashcards'),
+    },
+    {
+      label: 'Quizzes',
+      href: '/decks?tab=quizzes',
+      icon: HelpCircle,
+      active: pathname.startsWith('/decks') && pathname.includes('tab=quizzes'),
+    },
+    {
+      label: 'Exam Simulator',
+      href: '/exam',
+      icon: GraduationCap,
+      active: pathname.startsWith('/exam'),
+    },
+    {
+      label: 'Study Paths',
+      href: '/study-paths',
+      icon: Route,
+      active: pathname.startsWith('/study-paths'),
+    },
+    {
+      label: 'Weak Topics',
+      href: '/weak-topics',
+      icon: AlertCircle,
+      active: pathname.startsWith('/weak-topics'),
+    },
+    {
+      label: 'Knowledge Map',
+      href: '/connections',
+      icon: Network,
+      active: pathname.startsWith('/connections'),
+    },
+    {
+      label: 'AI Viva Prep',
+      href: '/viva',
+      icon: Mic,
+      active: pathname.startsWith('/viva'),
+    },
+    {
+      label: 'Review Hub',
+      href: '/review',
+      icon: RotateCw,
+      active: pathname.startsWith('/review'),
     },
     {
       label: 'Study Planner',
@@ -107,43 +168,55 @@ export default function Sidebar() {
       active: pathname.startsWith('/planner'),
     },
     {
-      label: 'Insights',
+      label: 'Analytics',
       href: '/insights',
       icon: BarChart3,
       active: pathname.startsWith('/insights'),
     },
   ];
 
-  if (!mounted) return null;
-
   return (
     <>
       {/* MOBILE TOP BAR (Narrow Viewports) */}
       <div className="lg:hidden bg-white dark:bg-[#0F172A] border-b border-[#E2E8F0] dark:border-[#263449] px-4 py-3 flex items-center justify-between sticky top-0 z-40">
-        <Link href="/" className="flex items-center gap-2">
+        <Link href="/" className="flex items-center gap-2.5">
           <img
             src="/logo.png"
             alt="Notionwell"
-            className="w-8 h-8 rounded-lg object-contain shadow-xs"
+            className="w-8 h-8 rounded-xl object-contain shadow-xs"
           />
-          <span className="font-extrabold text-base text-[#0F172A] dark:text-[#F8FAFC]">
-            Notionwell
-          </span>
+          <div className="flex flex-col">
+            <span className="font-extrabold text-base leading-none text-[#0F172A] dark:text-[#F8FAFC]">
+              Notionwell
+            </span>
+            <span className="text-[9px] text-[#2563EB] dark:text-[#3B82F6] font-bold tracking-wider uppercase mt-0.5">
+              From Notes to Knowledge
+            </span>
+          </div>
         </Link>
 
-        <button
-          onClick={() => setIsMobileOpen(!isMobileOpen)}
-          className="p-2 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] text-[#334155] dark:text-[#CBD5E1]"
-          aria-label="Toggle Navigation Menu"
-        >
-          {isMobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/create"
+            className="p-2 rounded-xl bg-[#2563EB] text-white shadow-xs"
+            title="Create New Deck"
+          >
+            <PlusCircle className="w-4 h-4" />
+          </Link>
+          <button
+            onClick={() => setIsMobileOpen(!isMobileOpen)}
+            className="p-2 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] text-[#334155] dark:text-[#CBD5E1]"
+            aria-label="Toggle Navigation Menu"
+          >
+            {isMobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
       </div>
 
       {/* MOBILE DRAWER BACKDROP OVERLAY */}
       {isMobileOpen && (
         <div
-          className="lg:hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-xs"
+          className="lg:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200"
           onClick={() => setIsMobileOpen(false)}
         />
       )}
@@ -154,19 +227,19 @@ export default function Sidebar() {
           isCollapsed ? 'w-20' : 'w-64'
         } ${
           isMobileOpen
-            ? 'translate-x-0 w-64'
+            ? 'translate-x-0 w-64 shadow-2xl'
             : '-translate-x-full lg:translate-x-0'
         }`}
       >
         {/* TOP SECTION: BRAND + ACTION BUTTON */}
-        <div className="p-4 space-y-4 overflow-y-auto max-h-[calc(100vh-220px)]">
+        <div className="p-4 space-y-4 overflow-y-auto max-h-[calc(100vh-210px)]">
           {/* BRAND LOGO */}
           <div className="flex items-center justify-between">
             <Link href="/" className="flex items-center gap-3 overflow-hidden group">
               <img
                 src="/logo.png"
                 alt="Notionwell"
-                className="w-10 h-10 rounded-xl object-contain shrink-0 shadow-xs group-hover:scale-105 transition-transform"
+                className="w-10 h-10 rounded-2xl object-contain shrink-0 shadow-xs group-hover:scale-105 transition-transform"
               />
 
               {!isCollapsed && (
@@ -174,8 +247,8 @@ export default function Sidebar() {
                   <span className="font-extrabold text-base leading-none text-[#0F172A] dark:text-[#F8FAFC]">
                     Notionwell
                   </span>
-                  <span className="text-[9px] text-[#2563EB] dark:text-[#3B82F6] font-extrabold tracking-wider uppercase mt-1">
-                    SMART STUDY PLATFORM
+                  <span className="text-[9px] text-[#2563EB] dark:text-[#3B82F6] font-bold tracking-wider uppercase mt-1">
+                    From Notes to Knowledge
                   </span>
                 </div>
               )}
@@ -184,7 +257,7 @@ export default function Sidebar() {
             {/* DESKTOP COLLAPSE/EXPAND TOGGLE BUTTON */}
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
-              className="hidden lg:flex p-1.5 rounded-lg border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] text-[#64748B] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white transition-colors"
+              className="hidden lg:flex p-1.5 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] text-[#64748B] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white transition-colors"
               title={isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
             >
               {isCollapsed ? (
@@ -195,30 +268,30 @@ export default function Sidebar() {
             </button>
           </div>
 
-          {/* DISTINCT "+ NEW DECK" ACTION BUTTON */}
+          {/* PRIMARY CTA: "+ GENERATE WITH AI" */}
           <Link
             href="/create"
-            className={`flex items-center justify-center gap-2 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] dark:bg-[#3B82F6] dark:hover:bg-[#60A5FA] text-white font-bold transition-all shadow-xs hover:scale-[1.01] ${
+            className={`flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#2563EB] to-[#1D4ED8] dark:from-[#3B82F6] dark:to-[#2563EB] hover:opacity-95 text-white font-extrabold transition-all shadow-md hover:scale-[1.01] ${
               isCollapsed ? 'p-3' : 'px-4 py-3 w-full'
             }`}
-            title="Create New Study Deck"
+            title="Generate Study Deck with AI"
           >
-            <PlusCircle className="w-5 h-5 shrink-0" />
-            {!isCollapsed && <span className="text-sm whitespace-nowrap">+ New Deck</span>}
+            <Sparkles className="w-4 h-4 shrink-0" />
+            {!isCollapsed && <span className="text-xs whitespace-nowrap tracking-wide">Generate with AI</span>}
           </Link>
 
           {/* PRIMARY NAV LINKS LIST */}
-          <nav className="space-y-1.5 pt-2">
+          <nav className="space-y-1 pt-1">
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
                 <Link
                   key={item.label}
                   href={item.href}
-                  className={`group relative flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-semibold transition-all ${
+                  className={`group relative flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                     item.active
-                      ? 'bg-[#EFF6FF] dark:bg-[#172554] text-[#2563EB] dark:text-[#60A5FA] border-l-4 border-[#2563EB] dark:border-[#3B82F6]'
-                      : 'text-[#334155] dark:text-[#CBD5E1] hover:text-[#0F172A] dark:hover:text-white hover:bg-[#F8FAFC] dark:hover:bg-[#172033]'
+                      ? 'bg-[#EFF6FF] dark:bg-[#172554] text-[#2563EB] dark:text-[#60A5FA] border-l-4 border-[#2563EB] dark:border-[#3B82F6] font-bold'
+                      : 'text-[#475569] dark:text-[#CBD5E1] hover:text-[#0F172A] dark:hover:text-white hover:bg-[#F8FAFC] dark:hover:bg-[#172033]'
                   }`}
                 >
                   <Icon
@@ -242,15 +315,30 @@ export default function Sidebar() {
                 </Link>
               );
             })}
+
+            {/* SETTINGS NAV LINK */}
+            <button
+              type="button"
+              onClick={() => setIsSettingsOpen(true)}
+              className="w-full group relative flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-[#475569] dark:text-[#CBD5E1] hover:text-[#0F172A] dark:hover:text-white hover:bg-[#F8FAFC] dark:hover:bg-[#172033] transition-all text-left"
+            >
+              <Settings className="w-4 h-4 shrink-0 text-[#64748B] dark:text-[#94A3B8] group-hover:text-[#0F172A] dark:hover:text-white" />
+              {!isCollapsed && <span className="whitespace-nowrap">Settings & Profile</span>}
+              {isCollapsed && (
+                <div className="absolute left-full ml-3 px-2.5 py-1 rounded-lg bg-[#0F172A] dark:bg-[#F8FAFC] text-white dark:text-[#0F172A] text-xs font-bold whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-50 shadow-md">
+                  Settings
+                </div>
+              )}
+            </button>
           </nav>
         </div>
 
-        {/* BOTTOM SECTION: STOPWATCH WIDGET, THEME TOGGLE, USER PROFILE */}
-        <div className="p-3 border-t border-[#E2E8F0] dark:border-[#263449] space-y-2.5 bg-[#F8FAFC]/50 dark:bg-[#172033]/50">
-          {/* MANUAL STOPWATCH WIDGET */}
+        {/* BOTTOM SECTION: STOPWATCH, THEME TOGGLE, USER PROFILE */}
+        <div className="p-3 border-t border-[#E2E8F0] dark:border-[#263449] space-y-2 bg-[#F8FAFC]/50 dark:bg-[#172033]/50">
+          {/* STOPWATCH COMPONENT */}
           <Stopwatch isCollapsed={isCollapsed} />
 
-          {/* DARK / LIGHT THEME TOGGLE */}
+          {/* THEME TOGGLE */}
           <button
             onClick={handleToggleTheme}
             className="w-full flex items-center justify-between p-2 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-white dark:bg-[#172033] text-[#334155] dark:text-[#CBD5E1] hover:text-[#0F172A] dark:hover:text-white transition-all text-xs font-semibold shadow-xs"
@@ -273,12 +361,17 @@ export default function Sidebar() {
             )}
           </button>
 
-          {/* USER PROFILE & LOGOUT */}
+          {/* USER PROFILE CARD */}
           {user ? (
-            <div className="flex items-center justify-between pt-1 border-t border-[#E2E8F0] dark:border-[#263449]">
-              <div className="flex items-center gap-2 overflow-hidden">
-                <div className="w-7 h-7 rounded-full bg-[#EFF6FF] dark:bg-[#172554] border border-[#DBEAFE] dark:border-[#1E3A8A] flex items-center justify-center font-bold text-[11px] text-[#2563EB] dark:text-[#60A5FA] uppercase shrink-0">
-                  {user.name ? user.name.slice(0, 2) : 'DE'}
+            <div className="flex items-center justify-between p-1.5 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-white dark:bg-[#111827]">
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(true)}
+                className="flex items-center gap-2 overflow-hidden text-left flex-1"
+                title="Open Settings"
+              >
+                <div className="w-7 h-7 rounded-full bg-[#EFF6FF] dark:bg-[#172554] border border-[#DBEAFE] dark:border-[#1E3A8A] flex items-center justify-center font-extrabold text-[11px] text-[#2563EB] dark:text-[#60A5FA] uppercase shrink-0">
+                  {user.name ? user.name.slice(0, 2) : 'ST'}
                 </div>
 
                 {!isCollapsed && (
@@ -286,14 +379,17 @@ export default function Sidebar() {
                     <span className="text-xs font-extrabold text-[#0F172A] dark:text-[#F8FAFC] truncate">
                       {user.name}
                     </span>
+                    <span className="text-[10px] text-[#64748B] dark:text-[#94A3B8] truncate">
+                      {user.email}
+                    </span>
                   </div>
                 )}
-              </div>
+              </button>
 
               <button
                 onClick={handleLogout}
-                className="p-1 rounded-xl text-[#64748B] dark:text-[#94A3B8] hover:text-[#EF4444] dark:hover:text-[#F87171] hover:bg-[#FEF2F2] dark:hover:bg-[#450A0A] transition-colors shrink-0"
-                title="Logout"
+                className="p-1.5 rounded-lg text-[#64748B] dark:text-[#94A3B8] hover:text-[#EF4444] dark:hover:text-[#F87171] hover:bg-[#FEF2F2] dark:hover:bg-[#450A0A] transition-colors shrink-0"
+                title="Sign Out"
               >
                 <LogOut className="w-3.5 h-3.5" />
               </button>
@@ -301,14 +397,17 @@ export default function Sidebar() {
           ) : (
             <Link
               href="/auth"
-              className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-[#2563EB] dark:text-[#3B82F6] hover:bg-[#EFF6FF] dark:hover:bg-[#172554] border border-[#DBEAFE] dark:border-[#1E3A8A] transition-colors"
+              className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold text-white bg-[#2563EB] hover:bg-[#1D4ED8] transition-colors shadow-xs"
             >
               <LogIn className="w-4 h-4 shrink-0" />
-              {!isCollapsed && <span>Sign In / Register</span>}
+              {!isCollapsed && <span>Sign In</span>}
             </Link>
           )}
         </div>
       </aside>
+
+      {/* GLOBAL SETTINGS MODAL */}
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </>
   );
 }

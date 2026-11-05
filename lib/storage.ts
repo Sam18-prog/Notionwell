@@ -27,6 +27,7 @@ export {
   clearDeckFromRecentlyViewed,
   saveDeck,
   moveDeckToSubject,
+  renameDeck,
   deleteDeck,
 
   // Multi-Source Document Storage
@@ -77,6 +78,16 @@ export {
   hasDuplicateOrOverlappingOptions,
   ensureOptionUniquenessAcrossQuiz,
 } from './app';
+
+export {
+  signUpUserWithSupabase,
+  signInUserWithSupabase,
+  signOutUserFromSupabase,
+  resetPasswordWithSupabase,
+  persistSupabaseUser,
+  getPersistedSupabaseUser,
+  initSupabaseAuthListener,
+} from './supabase/auth';
 
 export type {
   GeneratedStudyMaterial,

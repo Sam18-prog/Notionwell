@@ -1,18 +1,32 @@
 import Link from 'next/link';
+import { HelpCircle, Home, ArrowLeft } from 'lucide-react';
 
 export default function NotFound() {
   return (
-    <div className="min-h-[60vh] flex flex-col items-center justify-center text-center space-y-4">
-      <h2 className="text-4xl font-extrabold text-white">404 — Page Not Found</h2>
-      <p className="text-slate-400 text-sm">
-        The study page or deck you are looking for does not exist.
-      </p>
-      <Link
-        href="/"
-        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs transition-colors"
-      >
-        Return to Dashboard
-      </Link>
+    <div className="min-h-[70vh] flex items-center justify-center p-6 bg-[#F8FAFC] dark:bg-[#0A0F1D] text-[#0F172A] dark:text-[#F8FAFC]">
+      <div className="max-w-md w-full p-8 rounded-3xl bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#263449] shadow-xl text-center space-y-5">
+        <div className="w-14 h-14 rounded-2xl bg-blue-100 dark:bg-blue-950/60 text-[#2563EB] flex items-center justify-center mx-auto shadow-xs">
+          <HelpCircle className="w-7 h-7" />
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-3xl font-black text-[#2563EB]">404</div>
+          <h2 className="text-xl font-bold">Page Not Found</h2>
+          <p className="text-xs text-[#64748B] dark:text-[#94A3B8] leading-relaxed">
+            The study page or resource you are looking for does not exist or has been moved.
+          </p>
+        </div>
+
+        <div className="pt-2 flex items-center justify-center gap-3">
+          <Link
+            href="/"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold text-xs shadow-md transition-all"
+          >
+            <Home className="w-4 h-4" />
+            <span>Go to Dashboard</span>
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

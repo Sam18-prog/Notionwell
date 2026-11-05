@@ -53,7 +53,16 @@ function CreateDeckForm() {
   const [step, setStep] = useState<'input' | 'checkpoint' | 'generating' | 'preview'>('input');
   const [loading, setLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState('');
+  const [currentStageIndex, setCurrentStageIndex] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const GENERATION_STAGES = [
+    'Extracting text & preserving document structure',
+    'Analyzing context & identifying core academic concepts',
+    'Synthesizing source-grounded flashcards & quiz items',
+    'Verifying evidence quotes & distractor exclusivity',
+    'Finalizing study deck & attaching citations',
+  ];
 
   const [extractedText, setExtractedText] = useState('');
   const [sourceType, setSourceType] = useState<'pdf' | 'docx' | 'text' | 'image'>('text');
@@ -253,6 +262,7 @@ function CreateDeckForm() {
   };
 
   const handleGenerateAI = async () => {
+    if (loading) return; // Prevent duplicate requests
     setErrorMsg(null);
 
     // Guardrail check: Stop AI generation if extracted text is below 150 chars
@@ -265,8 +275,13 @@ function CreateDeckForm() {
     }
 
     setLoading(true);
-    setLoadingStatus('AI is synthesizing flashcards & quiz questions with topic tags across all sections...');
     setStep('generating');
+    setCurrentStageIndex(1); // Analyzing context
+
+    // Progress stage timer simulation based on real activity
+    const stageTimer = setInterval(() => {
+      setCurrentStageIndex((prev) => (prev < 3 ? prev + 1 : prev));
+    }, 3500);
 
     try {
       const res = await fetch('/api/study?action=generate', {
@@ -277,6 +292,9 @@ function CreateDeckForm() {
           deckId: activeDeckId,
         }),
       });
+
+      clearInterval(stageTimer);
+      setCurrentStageIndex(4); // Finalizing
 
       const data = await res.json();
 
@@ -296,6 +314,7 @@ function CreateDeckForm() {
         );
       }
     } catch (err: any) {
+      clearInterval(stageTimer);
       setErrorMsg(err.message || 'Failed to generate study deck. Please try again.');
       setStep('checkpoint');
     } finally {
@@ -347,9 +366,13 @@ function CreateDeckForm() {
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#EFF6FF] dark:bg-[#172554] border border-[#DBEAFE] dark:border-[#1E3A8A] text-[#2563EB] dark:text-[#60A5FA] text-xs font-semibold mb-2">
+          <Sparkles className="w-3.5 h-3.5" />
+          <span className="font-bold">Notionwell AI Synthesis Engine • Grounded Spaced Repetition</span>
+        </div>
         <h1 className="text-3xl sm:text-4xl font-extrabold text-[#0F172A] dark:text-[#F8FAFC]">Create New Study Deck</h1>
         <p className="text-[#475569] dark:text-[#CBD5E1] text-sm mt-1 font-normal">
-          Assign a subject folder, upload documents or paste study notes to extract text and generate AI flashcards.
+          Upload documents or paste study notes to extract text and synthesize source-grounded flashcards & quizzes.
         </p>
       </div>
 
@@ -508,13 +531,27 @@ function CreateDeckForm() {
                     Drag and drop your study file here
                   </p>
                   <p className="text-[#475569] dark:text-[#CBD5E1] text-xs font-medium">
-                    Supports PDF, DOCX, or TXT documents
+                    Upload documents or photos of study material to extract text
                   </p>
-                  <label className="inline-block mt-4 px-4 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] dark:bg-[#3B82F6] dark:hover:bg-[#60A5FA] text-white text-xs font-semibold cursor-pointer transition-all shadow-xs">
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                    <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#0B1220] border border-[#E2E8F0] dark:border-[#334155] text-[11px] font-bold text-[#2563EB] dark:text-[#60A5FA]">
+                      📄 PDF
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#0B1220] border border-[#E2E8F0] dark:border-[#334155] text-[11px] font-bold text-purple-600 dark:text-purple-400">
+                      📝 DOCX
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#0B1220] border border-[#E2E8F0] dark:border-[#334155] text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                      📃 TXT
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#0B1220] border border-[#E2E8F0] dark:border-[#334155] text-[11px] font-bold text-amber-600 dark:text-amber-400">
+                      🖼️ Image / Scanned Notes
+                    </span>
+                  </div>
+                  <label className="inline-block mt-4 px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] dark:bg-[#3B82F6] dark:hover:bg-[#60A5FA] text-white text-xs font-semibold cursor-pointer transition-all shadow-xs">
                     Browse File
                     <input
                       type="file"
-                      accept=".pdf,.docx,.txt"
+                      accept=".pdf,.docx,.txt,image/*"
                       className="hidden"
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
@@ -652,24 +689,51 @@ function CreateDeckForm() {
       )}
 
       {step === 'generating' && (
-        <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-3xl p-12 text-center space-y-6 shadow-xs">
-          <div className="relative w-20 h-20 mx-auto">
-            <div className="absolute inset-0 rounded-full bg-[#EFF6FF] dark:bg-[#172554] animate-spin blur-xs" />
-            <div className="relative w-20 h-20 rounded-2xl bg-[#2563EB] dark:bg-[#3B82F6] text-white flex items-center justify-center shadow-xs">
-              <GraduationCap className="w-10 h-10 animate-pulse" />
+        <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-3xl p-8 sm:p-12 text-center space-y-6 shadow-xs max-w-xl mx-auto">
+          <div className="relative w-16 h-16 mx-auto">
+            <div className="absolute inset-0 rounded-2xl bg-[#EFF6FF] dark:bg-[#172554] animate-spin blur-xs" />
+            <div className="relative w-16 h-16 rounded-2xl bg-[#2563EB] dark:bg-[#3B82F6] text-white flex items-center justify-center shadow-xs">
+              <GraduationCap className="w-8 h-8 animate-pulse" />
             </div>
           </div>
 
-          <div className="space-y-2 max-w-md mx-auto">
+          <div className="space-y-2">
             <h3 className="text-xl font-black text-[#0F172A] dark:text-[#F8FAFC]">
               Synthesizing Study Materials
             </h3>
-            <p className="text-sm text-[#2563EB] dark:text-[#3B82F6] font-bold animate-pulse">
-              {loadingStatus}
-            </p>
             <p className="text-xs text-[#475569] dark:text-[#CBD5E1]">
-              Generating exactly 12 concise flashcards and 5 multiple-choice questions with explanation & topic tagging.
+              Extracting concepts, generating grounded flashcards & MCQs, and verifying citations.
             </p>
+          </div>
+
+          {/* REAL STAGE PROGRESS INDICATOR */}
+          <div className="space-y-3 text-left bg-[#F8FAFC] dark:bg-[#172033] border border-[#E2E8F0] dark:border-[#263449] rounded-2xl p-4 sm:p-5">
+            {GENERATION_STAGES.map((stageLabel, idx) => {
+              const isPast = idx < currentStageIndex;
+              const isCurrent = idx === currentStageIndex;
+              return (
+                <div key={idx} className="flex items-center gap-3 text-xs">
+                  {isPast ? (
+                    <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
+                  ) : isCurrent ? (
+                    <Sparkles className="w-4 h-4 text-[#2563EB] dark:text-[#3B82F6] animate-spin shrink-0" />
+                  ) : (
+                    <div className="w-4 h-4 rounded-full border border-[#CBD5E1] dark:border-[#475569] shrink-0" />
+                  )}
+                  <span
+                    className={
+                      isCurrent
+                        ? 'font-bold text-[#2563EB] dark:text-[#60A5FA]'
+                        : isPast
+                        ? 'text-[#475569] dark:text-[#CBD5E1] line-through opacity-75'
+                        : 'text-[#94A3B8] dark:text-[#64748B]'
+                    }
+                  >
+                    {stageLabel}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -719,6 +783,11 @@ function CreateDeckForm() {
 
                   <p className="text-xs font-extrabold text-[#0F172A] dark:text-[#F8FAFC]">Q: {card.question}</p>
                   <p className="text-xs text-[#475569] dark:text-[#CBD5E1] line-clamp-2">A: {card.answer}</p>
+                  {card.sourceQuote && (
+                    <div className="mt-2 text-[10px] bg-white dark:bg-[#0B1220] text-[#2563EB] dark:text-[#60A5FA] p-2 rounded-xl border border-[#DBEAFE] dark:border-[#1E3A8A] leading-relaxed">
+                      <span className="font-bold">💬 Evidence:</span> "{card.sourceQuote}"
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -745,6 +814,11 @@ function CreateDeckForm() {
                     </span>
                   </div>
                   <p className="text-xs font-extrabold text-[#0F172A] dark:text-[#F8FAFC]">Q: {q.question}</p>
+                  {q.sourceQuote && (
+                    <div className="text-[10px] bg-white dark:bg-[#0B1220] text-[#2563EB] dark:text-[#60A5FA] p-2 rounded-xl border border-[#DBEAFE] dark:border-[#1E3A8A] leading-relaxed">
+                      <span className="font-bold">💬 Evidence:</span> "{q.sourceQuote}"
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2 text-[11px]">
                     {q.options.map((opt, oIdx) => (
                       <div

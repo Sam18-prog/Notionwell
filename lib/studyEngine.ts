@@ -347,9 +347,9 @@ export async function callAIStructured(
   // 1. Native Gemini REST API (Supports full schema adherence and high speed)
   if (geminiKey) {
     const models = [
-      process.env.AI_MODEL || 'gemini-3.5-flash',
+      process.env.AI_MODEL || 'gemini-2.5-flash',
+      'gemini-flash-latest',
       'gemini-flash-lite-latest',
-      'gemini-flash-latest'
     ];
 
     for (const model of models) {
@@ -533,6 +533,8 @@ REQUIRED JSON FORMAT:
             correctReviewCount: 0,
             lastReviewedDate: null,
             isWeakTopicReviewed: false,
+            sourceQuote: card.source_quote?.trim() || undefined,
+            sourceReference: chunk.title || 'Source Document',
           });
         }
       }
@@ -565,6 +567,8 @@ REQUIRED JSON FORMAT:
             correctAnswer: verification.normalizedCorrectAnswer,
             explanation: quizItem.explanation.trim(),
             topic: quizItem.topic?.trim() || quizItem.concept_tested?.trim() || chunk.title,
+            sourceQuote: quizItem.source_quote?.trim() || undefined,
+            sourceReference: chunk.title || 'Source Document',
           });
         }
       }
@@ -624,6 +628,8 @@ Generate strictly source-grounded items on different concepts. Return JSON only.
             correctReviewCount: 0,
             lastReviewedDate: null,
             isWeakTopicReviewed: false,
+            sourceQuote: card.source_quote?.trim() || undefined,
+            sourceReference: 'Source Document',
           });
         }
       }
@@ -653,6 +659,8 @@ Generate strictly source-grounded items on different concepts. Return JSON only.
             correctAnswer: verification.normalizedCorrectAnswer,
             explanation: quizItem.explanation.trim(),
             topic: quizItem.topic?.trim() || quizItem.concept_tested?.trim() || 'General',
+            sourceQuote: quizItem.source_quote?.trim() || undefined,
+            sourceReference: 'Source Document',
           });
         }
       }
