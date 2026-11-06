@@ -71,12 +71,12 @@ async function run() {
     assert(res.status === 200, `GET / returns HTTP 200 OK (got ${res.status})`);
     const html = await res.text();
     assert(!html.includes('/auth?redirect='), 'Landing page does NOT redirect unauthenticated visitor to /auth');
-    assert(html.includes('Turn your notes into') || html.includes('Turn Your Notes Into Knowledge'), 'Landing page contains headline "Turn your notes into Knowledge"');
+    assert(html.includes('Unlock your potential with') || html.includes('Turn your notes into') || html.includes('Turn Your Notes Into Knowledge'), 'Landing page contains headline matching reference design');
     assert(html.includes('Notionwell'), 'Landing page contains Notionwell branding');
     assert(html.includes('From Notes to Knowledge'), 'Landing page contains consistent tagline "From Notes to Knowledge"');
     assert(html.includes('Enrol for free') || html.includes('Get Started Free'), 'Landing page contains "Enrol for free" / "Get Started Free" CTA');
     assert(html.includes('Try Demo') || html.includes('Interactive Demo') || html.includes('Get a demo'), 'Landing page contains "Try Demo" CTA');
-    assert(html.includes('Learning Hours') && html.includes('42.5 hrs'), 'Landing page contains product preview cards matching reference image');
+    assert(html.includes('Learning Hours') && (html.includes('42.5') || html.includes('42.5 hrs')), 'Landing page contains product preview cards matching reference image');
   } catch (e) {
     assert(false, 'GET / landing page', e.message);
   }

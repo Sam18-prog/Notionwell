@@ -355,19 +355,19 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* DASHBOARD METRICS SUMMARY CARDS */}
+      {/* DASHBOARD METRICS SUMMARY CARDS (MATCHING REFERENCE AESTHETIC) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* TOTAL DECKS */}
-        <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-3xl p-5 shadow-xs">
+        <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-2xl p-5 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-[#64748B] dark:text-[#94A3B8] uppercase tracking-wider">
+            <span className="text-xs font-semibold text-[#64748B] dark:text-[#94A3B8]">
               Study Decks
             </span>
-            <div className="w-8 h-8 rounded-xl bg-[#EFF6FF] dark:bg-[#172554] flex items-center justify-center text-[#2563EB] dark:text-[#60A5FA]">
+            <div className="w-8 h-8 rounded-full bg-[#EFF6FF] dark:bg-[#172554] flex items-center justify-center text-[#2563EB] dark:text-[#60A5FA]">
               <BookOpen className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-[#0F172A] dark:text-[#F8FAFC] mt-3">
+          <div className="text-2xl sm:text-3xl font-bold text-[#0F172A] dark:text-[#F8FAFC] mt-3">
             {metrics.totalDecks}
           </div>
           <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8] mt-1 font-medium">
@@ -376,16 +376,16 @@ export default function DashboardPage() {
         </div>
 
         {/* CARDS DUE TODAY */}
-        <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-3xl p-5 shadow-xs">
+        <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-2xl p-5 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-[#64748B] dark:text-[#94A3B8] uppercase tracking-wider">
+            <span className="text-xs font-semibold text-[#64748B] dark:text-[#94A3B8]">
               Due Today
             </span>
-            <div className="w-8 h-8 rounded-xl bg-[#FEF2F2] dark:bg-[#450A0A] flex items-center justify-center text-[#EF4444] dark:text-[#F87171]">
+            <div className="w-8 h-8 rounded-full bg-[#FEF2F2] dark:bg-[#450A0A] flex items-center justify-center text-[#EF4444] dark:text-[#F87171]">
               <Timer className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-[#0F172A] dark:text-[#F8FAFC] mt-3">
+          <div className="text-2xl sm:text-3xl font-bold text-[#0F172A] dark:text-[#F8FAFC] mt-3">
             {metrics.cardsDueToday}
           </div>
           <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8] mt-1 font-medium">
@@ -394,16 +394,16 @@ export default function DashboardPage() {
         </div>
 
         {/* ACTIVE STUDY STREAK */}
-        <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-3xl p-5 shadow-xs">
+        <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-2xl p-5 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-[#64748B] dark:text-[#94A3B8] uppercase tracking-wider">
+            <span className="text-xs font-semibold text-[#64748B] dark:text-[#94A3B8]">
               Study Streak
             </span>
-            <div className="w-8 h-8 rounded-xl bg-[#FFFBEB] dark:bg-[#451A03] flex items-center justify-center text-[#F59E0B] dark:text-[#FBBF24]">
+            <div className="w-8 h-8 rounded-full bg-[#FFFBEB] dark:bg-[#451A03] flex items-center justify-center text-[#F59E0B] dark:text-[#FBBF24]">
               <Flame className="w-4 h-4 fill-[#F59E0B]" />
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-[#0F172A] dark:text-[#F8FAFC] mt-3">
+          <div className="text-2xl sm:text-3xl font-bold text-[#0F172A] dark:text-[#F8FAFC] mt-3">
             {metrics.streakDays} {metrics.streakDays === 1 ? 'Day' : 'Days'}
           </div>
           <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8] mt-1 font-medium">
@@ -412,16 +412,16 @@ export default function DashboardPage() {
         </div>
 
         {/* EXAM READINESS / AVERAGE SCORE */}
-        <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-3xl p-5 shadow-xs">
+        <div className="bg-white dark:bg-[#111827] border border-[#E2E8F0] dark:border-[#263449] rounded-2xl p-5 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-[#64748B] dark:text-[#94A3B8] uppercase tracking-wider">
+            <span className="text-xs font-semibold text-[#64748B] dark:text-[#94A3B8]">
               Avg Exam Score
             </span>
-            <div className="w-8 h-8 rounded-xl bg-[#F0FDF4] dark:bg-[#064E3B] flex items-center justify-center text-[#10B981] dark:text-[#34D399]">
+            <div className="w-8 h-8 rounded-full bg-[#F0FDF4] dark:bg-[#064E3B] flex items-center justify-center text-[#10B981] dark:text-[#34D399]">
               <Award className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-[#0F172A] dark:text-[#F8FAFC] mt-3">
+          <div className="text-2xl sm:text-3xl font-bold text-[#0F172A] dark:text-[#F8FAFC] mt-3">
             {examStats.averageScore > 0 ? `${examStats.averageScore}%` : 'N/A'}
           </div>
           <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8] mt-1 font-medium">
