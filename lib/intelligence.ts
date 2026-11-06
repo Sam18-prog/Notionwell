@@ -580,6 +580,7 @@ export interface CreateStudyPathParams {
   initialLevel?: DifficultyLevel;
   deckIds?: string[];
   documentIds?: string[];
+  syllabusText?: string;
 }
 
 export async function generatePersonalizedStudyPath(
@@ -596,6 +597,7 @@ export async function generatePersonalizedStudyPath(
     initialLevel = 'intermediate',
     deckIds = [],
     documentIds = [],
+    syllabusText,
   } = params;
 
   // Gather context from uploaded documents or decks
@@ -609,6 +611,10 @@ export async function generatePersonalizedStudyPath(
     sourceContext = relevantDocs.map(d => `- Document: "${d.fileName}" (${d.characterCount} chars)`).join('\n');
   } else {
     sourceContext = `- Subject Focus: ${subjectName}\n- Primary Objective: ${objective}`;
+  }
+
+  if (syllabusText && syllabusText.trim().length > 0) {
+    sourceContext = `=== PROVIDED OFFICIAL SYLLABUS / CURRICULUM OUTLINE ===\n${syllabusText.trim().slice(0, 5000)}\n\n` + sourceContext;
   }
 
   // Calculate timeline
@@ -629,7 +635,7 @@ export async function generatePersonalizedStudyPath(
     status: 'active',
     currentLevel: initialLevel,
     stagesCount: 4,
-    metadata: { deckIds, documentIds, totalDays: daysDiff },
+    metadata: { deckIds, documentIds, totalDays: daysDiff, hasSyllabus: Boolean(syllabusText) },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -657,6 +663,7 @@ STUDENT PROFILE:
 - Materials Available:
 ${sourceContext}
 
+${syllabusText ? 'CRITICAL CURRICULUM DIRECTIVE:\nThe student provided their official syllabus/curriculum outline above. You MUST directly map the 4 stages and individual task titles to the specific modules, chapters, topics, and units explicitly listed in that syllabus.\n' : ''}
 DESIGN REQUIREMENTS:
 1. Divide the curriculum into exactly 4 logical stages:
    Stage 1: Foundation & Core Terminology

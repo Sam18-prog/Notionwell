@@ -33,10 +33,8 @@ import {
   RotateCw,
   Route,
   AlertCircle,
-  Network,
   Mic,
 } from 'lucide-react';
-import Stopwatch from '@/components/Stopwatch';
 import SettingsModal from '@/components/SettingsModal';
 
 export default function Sidebar() {
@@ -142,12 +140,6 @@ export default function Sidebar() {
       href: '/weak-topics',
       icon: AlertCircle,
       active: pathname.startsWith('/weak-topics'),
-    },
-    {
-      label: 'Knowledge Map',
-      href: '/connections',
-      icon: Network,
-      active: pathname.startsWith('/connections'),
     },
     {
       label: 'AI Viva Prep',
@@ -333,11 +325,8 @@ export default function Sidebar() {
           </nav>
         </div>
 
-        {/* BOTTOM SECTION: STOPWATCH, THEME TOGGLE, USER PROFILE */}
+        {/* BOTTOM SECTION: THEME TOGGLE, USER PROFILE */}
         <div className="p-3 border-t border-[#E2E8F0] dark:border-[#263449] space-y-2 bg-[#F8FAFC]/50 dark:bg-[#172033]/50">
-          {/* STOPWATCH COMPONENT */}
-          <Stopwatch isCollapsed={isCollapsed} />
-
           {/* THEME TOGGLE */}
           <button
             onClick={handleToggleTheme}

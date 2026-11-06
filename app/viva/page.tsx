@@ -11,6 +11,7 @@ import {
   Sparkles,
   HelpCircle,
   CheckCircle2,
+  XCircle,
   AlertCircle,
   RefreshCw,
   Send,
@@ -67,6 +68,10 @@ export default function VivaPrepPage() {
 
   // Final Report state
   const [finalReport, setFinalReport] = useState<any | null>(null);
+
+  // Turn Evaluation state & error
+  const [currentEvaluation, setCurrentEvaluation] = useState<any | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -169,6 +174,8 @@ export default function VivaPrepPage() {
         setQuestionIndex(1);
         setTranscriptHistory([]);
         setFinalReport(null);
+        setCurrentEvaluation(null);
+        setSubmitError(null);
         setIsConfigOpen(false);
         setAnswerInput('');
 
@@ -186,10 +193,14 @@ export default function VivaPrepPage() {
     if (e) e.preventDefault();
     if (!answerInput.trim() || isSubmitting || !session) return;
 
+    setSubmitError(null);
     try {
       setIsSubmitting(true);
+      const wasVoice = isListening;
       if (isListening) {
-        recognitionRef.current?.stop();
+        try {
+          recognitionRef.current?.stop();
+        } catch {}
         setIsListening(false);
       }
       stopSpeaking();
@@ -202,43 +213,54 @@ export default function VivaPrepPage() {
           questionIndex,
           questionText: currentQuestion,
           studentResponse: answerInput.trim(),
-          isVoice: isListening,
+          isVoice: wasVoice,
         }),
       });
 
       const data = await res.json();
-      if (data.success && data.evaluation) {
-        const ev = data.evaluation;
-
-        // Record turn in transcript history
-        setTranscriptHistory(prev => [
-          ...prev,
-          {
-            qIndex: questionIndex,
-            question: currentQuestion,
-            studentAnswer: answerInput.trim(),
-            score: ev.score,
-            feedback: ev.feedback,
-          },
-        ]);
-
-        setAnswerInput('');
-
-        if (ev.isComplete) {
-          setFinalReport(ev.finalSummary);
-          speakText(`Viva complete. Your overall evaluation is ${ev.finalSummary.overallScore} percent. Well done.`);
-        } else {
-          setQuestionIndex(prev => prev + 1);
-          const nextQ = ev.followUpQuestion || `Could you elaborate further on how this applies to real-world edge cases?`;
-          setCurrentQuestion(nextQ);
-          speakText(`${ev.feedback} ... Next Question. ${nextQ}`);
-        }
+      if (!res.ok || !data.success || !data.evaluation) {
+        throw new Error(data.error || 'Failed to evaluate your response. Please try again.');
       }
-    } catch (err) {
+
+      const ev = data.evaluation;
+
+      // Record turn in transcript history
+      setTranscriptHistory(prev => [
+        ...prev,
+        {
+          qIndex: questionIndex,
+          question: currentQuestion,
+          studentAnswer: answerInput.trim(),
+          score: ev.score,
+          feedback: ev.feedback,
+        },
+      ]);
+
+      setCurrentEvaluation(ev);
+      speakText(ev.feedback);
+    } catch (err: any) {
       console.error('Failed to evaluate viva turn:', err);
+      setSubmitError(err?.message || 'Failed to evaluate response. Please check your connection and try again.');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleProceedToNextQuestion = () => {
+    if (!currentEvaluation || !session) return;
+
+    if (currentEvaluation.isComplete) {
+      setFinalReport(currentEvaluation.finalSummary);
+      speakText(`Viva complete. Your overall evaluation is ${currentEvaluation.finalSummary?.overallScore || 80} percent. Well done.`);
+    } else {
+      setQuestionIndex(prev => prev + 1);
+      const nextQ = currentEvaluation.followUpQuestion || `Could you elaborate further on how this applies to real-world edge cases?`;
+      setCurrentQuestion(nextQ);
+      speakText(`Question ${questionIndex + 1}. ${nextQ}`);
+    }
+    setCurrentEvaluation(null);
+    setAnswerInput('');
+    setSubmitError(null);
   };
 
   if (!mounted) return <VivaLoading />;
@@ -352,71 +374,151 @@ export default function VivaPrepPage() {
               </div>
             )}
 
-            {/* STUDENT ANSWER AREA */}
-            <form onSubmit={handleSubmitAnswer} className="space-y-3 pt-2">
-              <div className="flex items-center justify-between text-xs font-bold text-[#64748B] dark:text-[#94A3B8]">
-                <span>Your Verbal or Written Response:</span>
-                {speechSupported && (
-                  <span className="text-[11px] font-normal text-slate-500">
-                    {isListening ? '🎙️ Mic active • Speaking...' : 'Click microphone to answer aloud'}
-                  </span>
-                )}
-              </div>
-
-              {isListening && (
-                <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-2 animate-pulse">
-                  <Mic className="w-4 h-4 text-rose-500" />
-                  <span>Listening to your spoken answer... speak clearly into your microphone.</span>
+            {/* ERROR NOTIFICATION */}
+            {submitError && (
+              <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                  <span>{submitError}</span>
                 </div>
-              )}
-
-              <div className="relative">
-                <textarea
-                  value={answerInput}
-                  onChange={e => setAnswerInput(e.target.value)}
-                  placeholder="Articulate your answer clearly here, or click the mic button to speak your response aloud..."
-                  rows={4}
-                  className="w-full px-4 py-3 rounded-2xl border border-[#CBD5E1] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#1E293B] text-xs sm:text-sm text-[#0F172A] dark:text-white placeholder-[#94A3B8] outline-hidden focus:border-[#2563EB] resize-none shadow-inner"
-                />
-              </div>
-
-              <div className="flex items-center justify-between pt-1">
-                {speechSupported ? (
-                  <button
-                    type="button"
-                    onClick={toggleMic}
-                    className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
-                      isListening
-                        ? 'bg-rose-600 text-white animate-pulse shadow-md shadow-rose-500/20'
-                        : 'bg-slate-100 dark:bg-slate-800 text-[#64748B] dark:text-[#94A3B8] hover:text-[#2563EB]'
-                    }`}
-                  >
-                    {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                    <span>{isListening ? 'Finish Speaking' : 'Answer via Voice'}</span>
-                  </button>
-                ) : (
-                  <div className="text-[11px] text-[#94A3B8]">Voice input ready via keyboard</div>
-                )}
-
                 <button
-                  type="submit"
-                  disabled={!answerInput.trim() || isSubmitting}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-40 text-white font-extrabold text-xs shadow-md transition-all cursor-pointer"
+                  onClick={() => setSubmitError(null)}
+                  className="text-xs underline text-rose-600 hover:text-rose-800 dark:text-rose-400"
                 >
-                  {isSubmitting ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Evaluating Response...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Submit Verbal Response</span>
-                      <Send className="w-3.5 h-3.5" />
-                    </>
-                  )}
+                  Dismiss
                 </button>
               </div>
-            </form>
+            )}
+
+            {/* STRUCTURED EVALUATION REVIEW CARD */}
+            {currentEvaluation ? (
+              <div className="p-6 rounded-2xl bg-white dark:bg-[#131D31] border-2 border-indigo-200 dark:border-indigo-900/60 space-y-4 shadow-sm animate-in fade-in duration-200">
+                <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] dark:border-[#263449]">
+                  <div className="flex items-center gap-2">
+                    {currentEvaluation.score >= 8 ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Mastered Answer
+                      </span>
+                    ) : currentEvaluation.score >= 5 ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        Partially Correct
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                        <XCircle className="w-3.5 h-3.5" />
+                        Needs Review
+                      </span>
+                    )}
+                    <span className="text-xs font-extrabold text-[#64748B] dark:text-[#94A3B8]">
+                      Turn {questionIndex} Evaluation
+                    </span>
+                  </div>
+
+                  <div className="text-sm font-black text-[#2563EB] dark:text-[#60A5FA]">
+                    Score: {currentEvaluation.score.toFixed(1)} / 10
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 text-xs">
+                  <p className="font-extrabold text-[#0F172A] dark:text-white uppercase tracking-wider text-[10px]">
+                    Examiner Feedback:
+                  </p>
+                  <p className="text-xs sm:text-sm text-[#334155] dark:text-[#CBD5E1] leading-relaxed font-medium bg-[#F8FAFC] dark:bg-[#0F172A] p-4 rounded-xl border border-[#E2E8F0] dark:border-[#263449]">
+                    {currentEvaluation.feedback}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  <button
+                    onClick={() => speakText(currentEvaluation.feedback)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] text-xs font-bold text-[#64748B] dark:text-[#CBD5E1] hover:text-[#2563EB]"
+                  >
+                    <Volume2 className="w-3.5 h-3.5" />
+                    <span>Listen to Feedback</span>
+                  </button>
+
+                  <button
+                    onClick={handleProceedToNextQuestion}
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-extrabold text-xs shadow-md transition-all hover:scale-[1.02] cursor-pointer"
+                  >
+                    <span>
+                      {currentEvaluation.isComplete
+                        ? 'View Final Viva Report →'
+                        : `Next Question (${questionIndex + 1} of ${session.totalQuestions}) →`}
+                    </span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* STUDENT ANSWER AREA */
+              <form onSubmit={handleSubmitAnswer} className="space-y-3 pt-2">
+                <div className="flex items-center justify-between text-xs font-bold text-[#64748B] dark:text-[#94A3B8]">
+                  <span>Your Verbal or Written Response:</span>
+                  {speechSupported && (
+                    <span className="text-[11px] font-normal text-slate-500">
+                      {isListening ? '🎙️ Mic active • Speaking...' : 'Click microphone to answer aloud'}
+                    </span>
+                  )}
+                </div>
+
+                {isListening && (
+                  <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-2 animate-pulse">
+                    <Mic className="w-4 h-4 text-rose-500" />
+                    <span>Listening to your spoken answer... speak clearly into your microphone.</span>
+                  </div>
+                )}
+
+                <div className="relative">
+                  <textarea
+                    value={answerInput}
+                    onChange={e => setAnswerInput(e.target.value)}
+                    placeholder="Articulate your answer clearly here, or click the mic button to speak your response aloud..."
+                    rows={4}
+                    className="w-full px-4 py-3 rounded-2xl border border-[#CBD5E1] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#1E293B] text-xs sm:text-sm text-[#0F172A] dark:text-white placeholder-[#94A3B8] outline-hidden focus:border-[#2563EB] resize-none shadow-inner"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  {speechSupported ? (
+                    <button
+                      type="button"
+                      onClick={toggleMic}
+                      className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                        isListening
+                          ? 'bg-rose-600 text-white animate-pulse shadow-md shadow-rose-500/20'
+                          : 'bg-slate-100 dark:bg-slate-800 text-[#64748B] dark:text-[#94A3B8] hover:text-[#2563EB]'
+                      }`}
+                    >
+                      {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                      <span>{isListening ? 'Finish Speaking' : 'Answer via Voice'}</span>
+                    </button>
+                  ) : (
+                    <div className="text-[11px] text-[#94A3B8]">Voice input ready via keyboard</div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={!answerInput.trim() || isSubmitting}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] disabled:opacity-40 text-white font-extrabold text-xs shadow-md transition-all cursor-pointer"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Evaluating Response...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Submit Response</span>
+                        <Send className="w-3.5 h-3.5" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
 
           </div>
         ) : finalReport ? (

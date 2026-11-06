@@ -31,7 +31,7 @@ import {
   Flame,
   Search,
 } from 'lucide-react';
-import { getCurrentUser, getSubjects, getDecks, Subject, Deck, User } from '@/lib/app';
+import { getCurrentUser, getSubjects, getDecks, getDeckSources, Subject, Deck, User } from '@/lib/app';
 import { ExamConfig, ExamAttempt, ExamMode, ExamDifficulty, QuestionType, ExamDashboardStats } from '@/lib/exam';
 import ExamLoading from './loading';
 
@@ -140,6 +140,25 @@ export default function ExamHubPage() {
       const selectedSubject = subjects.find((s) => s.id === selectedSubjectId);
       const selectedDeck = decks.find((d) => d.id === selectedDeckId);
 
+      // Extract study material text & flashcards from selected deck or all available decks
+      let deckSourcesText = '';
+      let deckFlashcards: any[] = [];
+      if (selectedDeck) {
+        const sources = getDeckSources(selectedDeck.id);
+        deckSourcesText = sources.map((s) => s.extractedText).filter(Boolean).join('\n\n');
+        deckFlashcards = selectedDeck.flashcards || [];
+      } else {
+        const targetDecks = selectedSubjectId && selectedSubjectId !== 'all'
+          ? decks.filter((d) => d.subjectId === selectedSubjectId)
+          : decks;
+        for (const d of targetDecks) {
+          const sources = getDeckSources(d.id);
+          const sText = sources.map((s) => s.extractedText).filter(Boolean).join('\n\n');
+          if (sText) deckSourcesText += `\n\n${sText}`;
+          if (d.flashcards) deckFlashcards.push(...d.flashcards);
+        }
+      }
+
       const payload = {
         userId: user?.id || 'default-user',
         title: examTitle.trim() || (selectedDeck ? `${selectedDeck.name} Exam` : 'AI Simulated Exam'),
@@ -147,6 +166,8 @@ export default function ExamHubPage() {
         subjectName: selectedSubject?.name,
         deckId: selectedDeckId !== 'all' ? selectedDeckId : undefined,
         deckName: selectedDeck?.name,
+        deckSourcesText: deckSourcesText || undefined,
+        deckFlashcards: deckFlashcards.length > 0 ? deckFlashcards.slice(0, 50) : undefined,
         mode: examMode,
         difficulty,
         timeLimitMinutes: examMode === 'practice' && timeLimitMinutes === 0 ? 0 : timeLimitMinutes,

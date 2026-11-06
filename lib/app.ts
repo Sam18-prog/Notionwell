@@ -2609,6 +2609,17 @@ export function validateDeckQuality(material: GeneratedStudyMaterial): Generated
     );
     if (!hasValidAnswer) return false;
     return true;
+  }).map((q) => {
+    // Randomize option order so correct answers are not consistently in index 0
+    const opts = [...q.options];
+    for (let i = opts.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [opts[i], opts[j]] = [opts[j], opts[i]];
+    }
+    return {
+      ...q,
+      options: opts,
+    };
   });
 
   return {

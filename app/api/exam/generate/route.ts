@@ -61,8 +61,21 @@ export async function POST(req: NextRequest) {
     } = body;
 
     // 1. Gather study material text
-    let contextText = '';
+    let contextText = body.contextText || body.extractedText || '';
     const sourceReferences: string[] = [];
+
+    // Include client-supplied deck sources text and flashcards if provided
+    if (body.deckSourcesText && typeof body.deckSourcesText === 'string') {
+      contextText += `\n\n=== SOURCE EXTRACT: "${body.deckName || 'Study Material'}" ===\n${body.deckSourcesText}`;
+    }
+
+    if (Array.isArray(body.deckFlashcards) && body.deckFlashcards.length > 0) {
+      contextText += `\n\n=== FLASHCARD STUDY CONTENT ===\n`;
+      contextText += body.deckFlashcards
+        .slice(0, 40)
+        .map((f: any) => `Q: ${f.question} | A: ${f.answer} | Topic: ${f.topic || 'General'}`)
+        .join('\n');
+    }
 
     // Check RAG vector store documents
     const allStoredDocs = await getStoredDocuments(userId);
@@ -73,9 +86,9 @@ export async function POST(req: NextRequest) {
 
     // Load chunk text from Supabase document_chunks
     const chunksMap: Record<string, any[]> = {};
+    const admin = createAdminClient();
     if (matchedDocs.length > 0) {
       try {
-        const admin = createAdminClient();
         const docIds = matchedDocs.map((d) => d.id);
         const { data: dbChunks } = await admin
           .from('document_chunks')
@@ -106,6 +119,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // If still insufficient, query Supabase flashcards table directly
+    if (contextText.trim().length < 50) {
+      try {
+        let query = admin.from('flashcards').select('question, answer, topic');
+        if (deckId) {
+          query = query.eq('deck_id', deckId);
+        } else {
+          query = query.eq('user_id', userId).limit(30);
+        }
+        const { data: dbCards } = await query;
+        if (Array.isArray(dbCards) && dbCards.length > 0) {
+          contextText += `\n\n=== FLASHCARD STUDY CONTENT ===\n`;
+          contextText += dbCards
+            .map((f: any) => `Q: ${f.question} | A: ${f.answer} | Topic: ${f.topic || 'General'}`)
+            .join('\n');
+        }
+      } catch (dbErr: any) {
+        console.warn('[exam/generate] Could not query flashcards table:', dbErr?.message);
+      }
+    }
+
     // Also check deck sources if deckId provided
     if (deckId) {
       const deck = getDeckById(deckId);
@@ -124,7 +158,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!contextText.trim() || contextText.length < 80) {
+    if (!contextText.trim() || contextText.length < 40) {
       return NextResponse.json(
         {
           success: false,

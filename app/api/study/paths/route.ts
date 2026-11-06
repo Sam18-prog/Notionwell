@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
       subjectName,
       deckIds,
       documentIds,
+      syllabusText,
     } = body;
 
     if (!targetDate) {
@@ -63,6 +64,7 @@ export async function POST(req: NextRequest) {
       subjectName,
       deckIds,
       documentIds,
+      syllabusText,
     });
 
     return NextResponse.json({

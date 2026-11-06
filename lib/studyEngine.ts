@@ -72,6 +72,15 @@ export interface GroundedQuizDraft {
   questionType?: 'concept' | 'understanding' | 'cause_effect' | 'application' | 'comparison';
 }
 
+function shuffleOptions(options: string[]): string[] {
+  const shuffled = [...options];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
 /**
  * Calculates target counts dynamically based on document volume and information density.
  */
@@ -563,7 +572,7 @@ REQUIRED JSON FORMAT:
           validQuiz.push({
             id: uuidv4(),
             question: quizItem.question.trim(),
-            options: quizItem.options.map((opt) => opt.trim()),
+            options: shuffleOptions(quizItem.options.map((opt) => opt.trim())),
             correctAnswer: verification.normalizedCorrectAnswer,
             explanation: quizItem.explanation.trim(),
             topic: quizItem.topic?.trim() || quizItem.concept_tested?.trim() || chunk.title,
@@ -655,7 +664,7 @@ Generate strictly source-grounded items on different concepts. Return JSON only.
           validQuiz.push({
             id: uuidv4(),
             question: quizItem.question.trim(),
-            options: quizItem.options.map((opt) => opt.trim()),
+            options: shuffleOptions(quizItem.options.map((opt) => opt.trim())),
             correctAnswer: verification.normalizedCorrectAnswer,
             explanation: quizItem.explanation.trim(),
             topic: quizItem.topic?.trim() || quizItem.concept_tested?.trim() || 'General',

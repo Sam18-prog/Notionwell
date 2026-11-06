@@ -20,6 +20,9 @@ import {
   Sliders,
   AlertCircle,
   Folder,
+  UploadCloud,
+  FileText,
+  X,
 } from 'lucide-react';
 import { getCurrentUser, getDecks, getSubjects, Deck, Subject, User, savePlannerTask } from '@/lib/app';
 import { LearningPath, LearningPathTask } from '@/lib/intelligence';
@@ -49,6 +52,13 @@ export default function StudyPathsPage() {
   const [dailyMinutes, setDailyMinutes] = useState(30);
   const [initialLevel, setInitialLevel] = useState<'beginner' | 'intermediate' | 'advanced'>('intermediate');
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Syllabus extraction states
+  const [syllabusFile, setSyllabusFile] = useState<File | null>(null);
+  const [syllabusText, setSyllabusText] = useState('');
+  const [isExtractingSyllabus, setIsExtractingSyllabus] = useState(false);
+  const [syllabusExtractError, setSyllabusExtractError] = useState<string | null>(null);
+  const [syllabusInputMode, setSyllabusInputMode] = useState<'upload' | 'paste'>('upload');
 
   // Reschedule modal states
   const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
@@ -99,6 +109,36 @@ export default function StudyPathsPage() {
     }
   };
 
+  const handleSyllabusFileUpload = async (file: File) => {
+    if (!file) return;
+    setSyllabusFile(file);
+    setIsExtractingSyllabus(true);
+    setSyllabusExtractError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('/api/study?action=ingest', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || data.error || !data.text) {
+        throw new Error(data.error || 'Could not extract text from the uploaded syllabus.');
+      }
+      setSyllabusText(data.text);
+      if (!pathTitle) {
+        const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ');
+        setPathTitle(`${cleanName} Mastery Roadmap`);
+      }
+    } catch (err: any) {
+      console.error('Syllabus extraction error:', err);
+      setSyllabusExtractError(err?.message || 'Failed to extract text from syllabus. You can also paste topics manually.');
+    } finally {
+      setIsExtractingSyllabus(false);
+    }
+  };
+
   const handleCreatePath = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!targetDate || isGenerating) return;
@@ -117,6 +157,7 @@ export default function StudyPathsPage() {
           initialLevel,
           subjectId: selectedSubjectId || undefined,
           subjectName: subj?.name || 'General Course',
+          syllabusText: syllabusText.trim() || undefined,
         }),
       });
 
@@ -125,6 +166,9 @@ export default function StudyPathsPage() {
         setIsCreateModalOpen(false);
         setPathTitle('');
         setObjective('');
+        setSyllabusFile(null);
+        setSyllabusText('');
+        setSyllabusExtractError(null);
         await loadPaths();
         if (data.path) {
           setSelectedPath(data.path);
@@ -507,6 +551,126 @@ export default function StudyPathsPage() {
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
                 </select>
+              </div>
+
+              {/* SYLLABUS PDF / IMAGE / TEXT UPLOAD */}
+              <div className="space-y-2 p-3.5 rounded-2xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/40 dark:bg-blue-950/20">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-[#2563EB]" />
+                    <label className="font-extrabold text-xs text-[#0F172A] dark:text-white">
+                      Curriculum / Syllabus Document (Optional)
+                    </label>
+                  </div>
+                  <div className="flex rounded-lg bg-white dark:bg-[#0F172A] p-0.5 border border-[#E2E8F0] dark:border-[#263449]">
+                    <button
+                      type="button"
+                      onClick={() => setSyllabusInputMode('upload')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        syllabusInputMode === 'upload'
+                          ? 'bg-[#2563EB] text-white'
+                          : 'text-[#64748B] hover:text-[#0F172A] dark:hover:text-white'
+                      }`}
+                    >
+                      Upload File
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSyllabusInputMode('paste')}
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        syllabusInputMode === 'paste'
+                          ? 'bg-[#2563EB] text-white'
+                          : 'text-[#64748B] hover:text-[#0F172A] dark:hover:text-white'
+                      }`}
+                    >
+                      Paste Text
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+                  Upload a course syllabus PDF, slide image, or textbook index. The AI will extract modules and shape your roadmap tasks around your exact curriculum.
+                </p>
+
+                {syllabusExtractError && (
+                  <div className="p-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-[11px] flex items-center justify-between">
+                    <span>{syllabusExtractError}</span>
+                    <button type="button" onClick={() => setSyllabusExtractError(null)} className="underline ml-2">Dismiss</button>
+                  </div>
+                )}
+
+                {syllabusInputMode === 'upload' ? (
+                  <div>
+                    {!syllabusFile && !syllabusText ? (
+                      <label className="flex flex-col items-center justify-center p-4 border-2 border-dashed border-blue-200 dark:border-blue-800 rounded-xl cursor-pointer bg-white dark:bg-[#0F172A] hover:bg-blue-50/50 dark:hover:bg-blue-950/40 transition-colors">
+                        <UploadCloud className="w-5 h-5 text-[#2563EB] mb-1" />
+                        <span className="text-xs font-bold text-[#0F172A] dark:text-white">
+                          Select Syllabus PDF or Image
+                        </span>
+                        <span className="text-[10px] text-[#64748B] dark:text-[#94A3B8]">
+                          Supports PDF, PNG, JPG, JPEG, TXT, DOCX
+                        </span>
+                        <input
+                          type="file"
+                          accept=".pdf,.png,.jpg,.jpeg,.txt,.docx"
+                          onChange={e => {
+                            if (e.target.files && e.target.files[0]) {
+                              handleSyllabusFileUpload(e.target.files[0]);
+                            }
+                          }}
+                          className="hidden"
+                          disabled={isExtractingSyllabus}
+                        />
+                      </label>
+                    ) : null}
+
+                    {isExtractingSyllabus && (
+                      <div className="p-3 rounded-xl bg-blue-100 dark:bg-blue-950/60 border border-blue-300 dark:border-blue-800 flex items-center justify-center gap-2 text-xs font-bold text-[#2563EB] dark:text-[#60A5FA]">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Extracting syllabus topics &amp; modules via AI OCR...</span>
+                      </div>
+                    )}
+
+                    {syllabusText && !isExtractingSyllabus && (
+                      <div className="p-3 rounded-xl bg-white dark:bg-[#0F172A] border border-blue-200 dark:border-blue-900 space-y-2">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-extrabold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            {syllabusFile ? syllabusFile.name : 'Syllabus Extracted'} ({syllabusText.length} chars)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSyllabusFile(null);
+                              setSyllabusText('');
+                            }}
+                            className="text-rose-500 hover:text-rose-700 font-bold"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div className="p-2 rounded-lg bg-[#F8FAFC] dark:bg-[#1E293B] max-h-24 overflow-y-auto text-[11px] text-[#475569] dark:text-[#CBD5E1] font-mono leading-relaxed">
+                          {syllabusText.slice(0, 500)}...
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <textarea
+                      value={syllabusText}
+                      onChange={e => setSyllabusText(e.target.value)}
+                      placeholder="Paste your course outline, unit titles, chapters, or syllabus breakdown..."
+                      rows={3}
+                      className="w-full px-3 py-2 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-white dark:bg-[#0F172A] text-xs font-medium resize-none"
+                    />
+                    {syllabusText && (
+                      <div className="text-[10px] text-emerald-600 font-semibold pt-1">
+                        ✓ {syllabusText.length} characters of syllabus curriculum detected
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">

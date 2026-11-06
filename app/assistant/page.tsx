@@ -97,7 +97,7 @@ export default function AssistantPage() {
 
   // Layout states
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
-  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [rightActiveTab, setRightActiveTab] = useState<'studio' | 'notes'>('studio');
 
   // Sources states
@@ -836,20 +836,6 @@ export default function AssistantPage() {
             <BookOpen className="w-4 h-4" />
             <span className="hidden sm:inline">Sources ({enabledSourcesCount})</span>
           </button>
-
-          {/* Toggle Right Studio Panel */}
-          <button
-            onClick={() => setRightPanelOpen(!rightPanelOpen)}
-            className={`p-2 rounded-xl border text-xs font-semibold transition-colors flex items-center gap-1.5 ${
-              rightPanelOpen
-                ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800 text-[#2563EB] dark:text-[#60A5FA]'
-                : 'border-[#E2E8F0] dark:border-[#263449] bg-white dark:bg-[#0F172A] text-[#64748B] dark:text-[#94A3B8]'
-            }`}
-            title="Toggle Studio & Notes Panel"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span className="hidden sm:inline">Studio</span>
-          </button>
         </div>
       </header>
 
@@ -1022,45 +1008,9 @@ export default function AssistantPage() {
                 </p>
               </div>
 
-              {/* Quick Action Chips */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <button
-                  onClick={() => {
-                    setRightActiveTab('notes');
-                    setIsCreatingNote(true);
-                    setRightPanelOpen(true);
-                  }}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] hover:bg-blue-50 dark:hover:bg-blue-950/60 text-xs font-semibold text-[#334155] dark:text-[#CBD5E1] transition-colors"
-                >
-                  <Plus className="w-3 h-3 text-[#2563EB]" />
-                  <span>Add note</span>
-                </button>
-
-                <button
-                  onClick={() => handleGenerateStudio('study_guide')}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] hover:bg-blue-50 dark:hover:bg-blue-950/60 text-xs font-semibold text-[#334155] dark:text-[#CBD5E1] transition-colors"
-                >
-                  <BookOpen className="w-3 h-3 text-[#2563EB]" />
-                  <span>Study Guide</span>
-                </button>
-
-                <button
-                  onClick={() => handleGenerateStudio('faq')}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] hover:bg-blue-50 dark:hover:bg-blue-950/60 text-xs font-semibold text-[#334155] dark:text-[#CBD5E1] transition-colors"
-                >
-                  <HelpCircle className="w-3 h-3 text-[#2563EB]" />
-                  <span>FAQ</span>
-                </button>
-
-                <button
-                  onClick={() => handleGenerateStudio('mcqs')}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] hover:bg-blue-50 dark:hover:bg-blue-950/60 text-xs font-semibold text-[#334155] dark:text-[#CBD5E1] transition-colors"
-                >
-                  <Layers className="w-3 h-3 text-[#2563EB]" />
-                  <span>5 MCQs</span>
-                </button>
-
-                {messages.length > 0 && (
+              {/* Clear Chat */}
+              {messages.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <button
                     onClick={() => {
                       if (confirm('Clear chat messages for this session?')) {
@@ -1072,8 +1022,8 @@ export default function AssistantPage() {
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1141,32 +1091,7 @@ export default function AssistantPage() {
                       </ReactMarkdown>
                     </div>
 
-                    {/* Citations Footer for Assistant Messages */}
-                    {msg.citations && msg.citations.length > 0 && (
-                      <div className="mt-4 pt-3 border-t border-[#E2E8F0] dark:border-[#263449] space-y-2">
-                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#64748B] dark:text-[#94A3B8]">
-                          <Bookmark className="w-3.5 h-3.5 text-[#2563EB]" />
-                          <span>Retrieved Source Citations:</span>
-                        </div>
-
-                        <div className="flex flex-wrap gap-1.5">
-                          {msg.citations.map((c) => (
-                            <button
-                              key={c.index}
-                              onClick={() => setSelectedCitation(c)}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/70 text-[#2563EB] dark:text-[#60A5FA] border border-blue-200 dark:border-blue-800/80 text-[11px] font-semibold hover:bg-blue-100 transition-colors"
-                              title={`Click to view citation excerpt from ${c.documentName}`}
-                            >
-                              <span className="font-extrabold">[{c.index}]</span>
-                              <span className="truncate max-w-[120px]">{c.documentName}</span>
-                              <span className="text-[10px] text-[#3B82F6] font-bold">
-                                ({c.similarity}%)
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    {/* Citations hidden — RAG retrieval continues on backend */}
 
                     {/* Message Actions */}
                     {msg.role === 'assistant' && (
@@ -1206,15 +1131,6 @@ export default function AssistantPage() {
                               <Copy className="w-3.5 h-3.5" />
                             )}
                             <span>Copy</span>
-                          </button>
-
-                          <button
-                            onClick={() => handleSaveMessageToNotes(msg)}
-                            className="flex items-center gap-1 text-[#64748B] dark:text-[#94A3B8] hover:text-[#2563EB] dark:hover:text-[#60A5FA] transition-colors"
-                            title="Save excerpt to notes"
-                          >
-                            <Bookmark className="w-3.5 h-3.5" />
-                            <span>Save to Notes</span>
                           </button>
                         </div>
                       </div>
@@ -1316,318 +1232,6 @@ export default function AssistantPage() {
             </div>
           </div>
         </section>
-
-        {/* =====================================================================
-            RIGHT PANEL: STUDIO / NOTES & STUDY GUIDE (Width ~360px)
-        ====================================================================== */}
-        {rightPanelOpen && (
-          <aside className="w-80 sm:w-96 shrink-0 border-l border-[#E2E8F0] dark:border-[#263449] bg-white dark:bg-[#0F172A] flex flex-col justify-between transition-all duration-200 z-10">
-            {/* Studio / Notes Tabs */}
-            <div className="p-3 border-b border-[#E2E8F0] dark:border-[#263449] flex items-center justify-between">
-              <div className="flex items-center gap-1 p-1 rounded-xl bg-[#F1F5F9] dark:bg-[#172033]">
-                <button
-                  onClick={() => setRightActiveTab('studio')}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                    rightActiveTab === 'studio'
-                      ? 'bg-white dark:bg-[#0F172A] text-[#2563EB] dark:text-[#60A5FA] shadow-xs'
-                      : 'text-[#64748B] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white'
-                  }`}
-                >
-                  Studio
-                </button>
-                <button
-                  onClick={() => setRightActiveTab('notes')}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                    rightActiveTab === 'notes'
-                      ? 'bg-white dark:bg-[#0F172A] text-[#2563EB] dark:text-[#60A5FA] shadow-xs'
-                      : 'text-[#64748B] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white'
-                  }`}
-                >
-                  Notes ({notes.length})
-                </button>
-              </div>
-
-              <button
-                onClick={() => setRightPanelOpen(false)}
-                className="p-1.5 text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white transition-colors"
-                title="Collapse Studio Panel"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* TAB CONTENT */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {/* ---------------------------------------------------------------
-                  1. STUDIO TAB CONTENT
-              ---------------------------------------------------------------- */}
-              {rightActiveTab === 'studio' && (
-                <div className="space-y-4">
-                  {/* Studio Generator Action Grid */}
-                  <div className="space-y-2">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#475569] dark:text-[#94A3B8]">
-                      AI Study Synthesizers
-                    </h3>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => handleGenerateStudio('study_guide')}
-                        disabled={isStudioLoading}
-                        className="p-3 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] hover:border-[#2563EB] hover:bg-blue-50/50 dark:hover:bg-blue-950/30 text-left transition-all group disabled:opacity-50"
-                      >
-                        <BookOpen className="w-4 h-4 text-[#2563EB] mb-2" />
-                        <p className="text-xs font-bold text-[#0F172A] dark:text-[#F8FAFC]">
-                          Study guide
-                        </p>
-                        <p className="text-[10px] text-[#64748B] dark:text-[#94A3B8] mt-0.5">
-                          Comprehensive curriculum
-                        </p>
-                      </button>
-
-                      <button
-                        onClick={() => handleGenerateStudio('briefing_doc')}
-                        disabled={isStudioLoading}
-                        className="p-3 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] hover:border-[#2563EB] hover:bg-blue-50/50 dark:hover:bg-blue-950/30 text-left transition-all group disabled:opacity-50"
-                      >
-                        <FileText className="w-4 h-4 text-[#2563EB] mb-2" />
-                        <p className="text-xs font-bold text-[#0F172A] dark:text-[#F8FAFC]">
-                          Briefing doc
-                        </p>
-                        <p className="text-[10px] text-[#64748B] dark:text-[#94A3B8] mt-0.5">
-                          High-level summary
-                        </p>
-                      </button>
-
-                      <button
-                        onClick={() => handleGenerateStudio('faq')}
-                        disabled={isStudioLoading}
-                        className="p-3 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] hover:border-[#2563EB] hover:bg-blue-50/50 dark:hover:bg-blue-950/30 text-left transition-all group disabled:opacity-50"
-                      >
-                        <HelpCircle className="w-4 h-4 text-[#2563EB] mb-2" />
-                        <p className="text-xs font-bold text-[#0F172A] dark:text-[#F8FAFC]">
-                          FAQ
-                        </p>
-                        <p className="text-[10px] text-[#64748B] dark:text-[#94A3B8] mt-0.5">
-                          Conceptual Q&A
-                        </p>
-                      </button>
-
-                      <button
-                        onClick={() => handleGenerateStudio('timeline')}
-                        disabled={isStudioLoading}
-                        className="p-3 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] hover:border-[#2563EB] hover:bg-blue-50/50 dark:hover:bg-blue-950/30 text-left transition-all group disabled:opacity-50"
-                      >
-                        <Clock className="w-4 h-4 text-[#2563EB] mb-2" />
-                        <p className="text-xs font-bold text-[#0F172A] dark:text-[#F8FAFC]">
-                          Timeline
-                        </p>
-                        <p className="text-[10px] text-[#64748B] dark:text-[#94A3B8] mt-0.5">
-                          Progressive roadmap
-                        </p>
-                      </button>
-                    </div>
-
-                    <button
-                      onClick={() => handleGenerateStudio('mcqs')}
-                      disabled={isStudioLoading}
-                      className="w-full p-2.5 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] hover:border-[#2563EB] text-left transition-all flex items-center justify-between group disabled:opacity-50"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Layers className="w-4 h-4 text-[#2563EB]" />
-                        <span className="text-xs font-bold text-[#0F172A] dark:text-[#F8FAFC]">
-                          Generate 5 Practice MCQs
-                        </span>
-                      </div>
-                      <ArrowRight className="w-3.5 h-3.5 text-[#94A3B8] group-hover:text-[#2563EB]" />
-                    </button>
-                  </div>
-
-                  {/* Loading State */}
-                  {isStudioLoading && (
-                    <div className="p-6 rounded-2xl border border-blue-200 dark:border-blue-900 bg-blue-50/30 dark:bg-blue-950/20 text-center space-y-3">
-                      <RefreshCw className="w-6 h-6 animate-spin text-[#2563EB] mx-auto" />
-                      <p className="text-xs font-bold text-[#0F172A] dark:text-[#F8FAFC]">
-                        Synthesizing {studioTypeLoading?.replace('_', ' ')}...
-                      </p>
-                      <p className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
-                        Analyzing {enabledSourcesCount} sources and assembling comprehensive study material.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Generated Artifact Display */}
-                  {activeArtifact && !isStudioLoading && (
-                    <div className="space-y-3 pt-2">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <h4 className="text-xs font-extrabold text-[#0F172A] dark:text-[#F8FAFC]">
-                            {activeArtifact.title}
-                          </h4>
-                          <p className="text-[10px] text-[#64748B] dark:text-[#94A3B8]">
-                            Synthesized from {activeArtifact.sourcesCount} sources • {activeArtifact.createdAt}
-                          </p>
-                        </div>
-
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleSaveArtifactToNotes(activeArtifact)}
-                            className="p-1.5 rounded-lg border border-[#E2E8F0] dark:border-[#263449] text-[#64748B] dark:text-[#94A3B8] hover:text-[#2563EB] transition-colors"
-                            title="Save to Notes"
-                          >
-                            <Bookmark className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            onClick={() => copyToClipboard(activeArtifact.content, 'studio-artifact')}
-                            className="p-1.5 rounded-lg border border-[#E2E8F0] dark:border-[#263449] text-[#64748B] dark:text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white transition-colors"
-                            title="Copy Markdown"
-                          >
-                            {copiedId === 'studio-artifact' ? (
-                              <Check className="w-3.5 h-3.5 text-emerald-500" />
-                            ) : (
-                              <Copy className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="p-3.5 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] max-h-96 overflow-y-auto text-xs leading-relaxed">
-                        <div className="prose prose-xs dark:prose-invert max-w-none">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {activeArtifact.content}
-                          </ReactMarkdown>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ---------------------------------------------------------------
-                  2. NOTES TAB CONTENT
-              ---------------------------------------------------------------- */}
-              {rightActiveTab === 'notes' && (
-                <div className="space-y-4">
-                  {/* Add Note Button / Form */}
-                  {!isCreatingNote ? (
-                    <button
-                      onClick={() => setIsCreatingNote(true)}
-                      className="w-full py-2.5 rounded-xl border-2 border-dashed border-[#E2E8F0] dark:border-[#263449] hover:border-[#2563EB] text-[#64748B] dark:text-[#94A3B8] hover:text-[#2563EB] text-xs font-bold transition-all flex items-center justify-center gap-1.5"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>Add new note</span>
-                    </button>
-                  ) : (
-                    <div className="p-3.5 rounded-xl border border-[#2563EB] bg-[#F8FAFC] dark:bg-[#172033] space-y-2.5">
-                      <input
-                        type="text"
-                        placeholder="Note Title..."
-                        value={newNoteTitle}
-                        onChange={(e) => setNewNoteTitle(e.target.value)}
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2E8F0] dark:border-[#263449] bg-white dark:bg-[#0F172A] text-xs font-bold text-[#0F172A] dark:text-white outline-hidden"
-                      />
-                      <textarea
-                        rows={4}
-                        placeholder="Write or paste your key takeaways here..."
-                        value={newNoteContent}
-                        onChange={(e) => setNewNoteContent(e.target.value)}
-                        className="w-full px-2.5 py-1.5 rounded-lg border border-[#E2E8F0] dark:border-[#263449] bg-white dark:bg-[#0F172A] text-xs text-[#0F172A] dark:text-white outline-hidden resize-none"
-                      />
-                      <div className="flex items-center justify-end gap-2 pt-1">
-                        <button
-                          onClick={() => {
-                            setIsCreatingNote(false);
-                            setNewNoteTitle('');
-                            setNewNoteContent('');
-                          }}
-                          className="px-2.5 py-1 text-xs font-semibold text-[#64748B] hover:text-[#0F172A] dark:hover:text-white"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={handleSaveNote}
-                          className="px-3 py-1 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold"
-                        >
-                          Save Note
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Notes List */}
-                  {notes.length === 0 ? (
-                    <div className="py-12 text-center text-[#64748B] dark:text-[#94A3B8]">
-                      <Bookmark className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                      <p className="text-xs font-bold">No saved notes yet</p>
-                      <p className="text-[11px] mt-1">
-                        Save excerpts from chat responses or create your own custom notes.
-                      </p>
-                    </div>
-                  ) : (
-                    notes.map((note) => (
-                      <div
-                        key={note.id}
-                        className="p-3.5 rounded-xl border border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] space-y-2 group"
-                      >
-                        <div className="flex items-center justify-between">
-                          <h4 className="text-xs font-extrabold text-[#0F172A] dark:text-[#F8FAFC] truncate">
-                            {note.title}
-                          </h4>
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => copyToClipboard(note.content, note.id)}
-                              className="p-1 text-[#94A3B8] hover:text-[#0F172A] dark:hover:text-white"
-                              title="Copy"
-                            >
-                              <Copy className="w-3 h-3" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteNote(note.id)}
-                              className="p-1 text-[#94A3B8] hover:text-rose-500"
-                              title="Delete"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </div>
-
-                        <p className="text-xs text-[#475569] dark:text-[#CBD5E1] line-clamp-4 whitespace-pre-wrap">
-                          {note.content}
-                        </p>
-
-                        <div className="flex items-center justify-between pt-1 text-[10px] text-[#94A3B8]">
-                          <span>{note.sourceTag || 'Note'}</span>
-                          <span>{note.createdAt}</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Studio Footer */}
-            <div className="p-3 border-t border-[#E2E8F0] dark:border-[#263449] bg-[#F8FAFC] dark:bg-[#172033] text-[11px] text-[#64748B] dark:text-[#94A3B8] flex items-center justify-between">
-              <span>{notes.length} saved notes</span>
-              <button
-                onClick={() => {
-                  const allNotesMarkdown = notes
-                    .map((n) => `## ${n.title}\n*${n.createdAt}*\n\n${n.content}`)
-                    .join('\n\n---\n\n');
-                  const blob = new Blob([allNotesMarkdown], { type: 'text/markdown' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `Notionwell_Notes_${new Date().toISOString().slice(0, 10)}.md`;
-                  a.click();
-                }}
-                className="flex items-center gap-1 text-[#2563EB] dark:text-[#60A5FA] font-bold hover:underline"
-              >
-                <Download className="w-3 h-3" /> Export Notes
-              </button>
-            </div>
-          </aside>
-        )}
       </div>
 
       {/* =======================================================================

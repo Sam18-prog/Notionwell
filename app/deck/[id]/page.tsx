@@ -97,6 +97,7 @@ export default function DeckDetailPage() {
 
   // QUIZ SESSION STATE
   const [quizQuestions, setQuizQuestions] = useState<QuizQuestion[]>([]);
+  const [shuffledOptions, setShuffledOptions] = useState<string[][]>([]); // per-question shuffled options
   const [currentQuizIndex, setCurrentQuizIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [quizScore, setQuizScore] = useState(0);
@@ -454,6 +455,16 @@ export default function DeckDetailPage() {
   const initQuizSession = (d: Deck | null) => {
     if (!d) return;
     const questions = d.quizQuestions || [];
+    // Shuffle each question's options once at session start (Fisher-Yates)
+    const shuffled = questions.map((q) => {
+      const opts = [...q.options];
+      for (let i = opts.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [opts[i], opts[j]] = [opts[j], opts[i]];
+      }
+      return opts;
+    });
+    setShuffledOptions(shuffled);
     setQuizQuestions(questions);
     setCurrentQuizIndex(0);
     setSelectedOption(null);
@@ -1195,7 +1206,7 @@ export default function DeckDetailPage() {
               </div>
 
               <div className="space-y-3">
-                {quizQuestions[currentQuizIndex]?.options.map((option, idx) => {
+                {(shuffledOptions[currentQuizIndex] || quizQuestions[currentQuizIndex]?.options || []).map((option, idx) => {
                   const currentQ = quizQuestions[currentQuizIndex];
                   const isSelected = selectedOption === option;
                   const isCorrect = option === currentQ.correctAnswer;
