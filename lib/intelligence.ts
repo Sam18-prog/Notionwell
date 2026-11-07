@@ -131,6 +131,8 @@ export interface VivaSession {
   subjectId?: string | null;
   deckId?: string | null;
   documentId?: string | null;
+  sourceType?: 'document' | 'deck' | 'custom';
+  sourceTitle?: string;
   topicTitle: string;
   vivaMode: VivaMode;
   difficulty: DifficultyLevel;
@@ -146,6 +148,7 @@ export interface VivaSession {
     improvements: string[];
     overallCritique: string;
   };
+  turns?: VivaResponse[];
   createdAt: string;
   completedAt?: string | null;
 }
@@ -159,7 +162,13 @@ export interface VivaResponse {
   studentResponse: string;
   isVoice: boolean;
   score: number; // 0 - 10
+  evaluationStatus?: 'correct' | 'partially_correct' | 'incorrect';
   feedback: string;
+  strengths?: string[];
+  missingPoints?: string[];
+  technicalInaccuracies?: string[];
+  idealAnswer?: string;
+  suggestions?: string[];
   followUpQuestion?: string | null;
   createdAt: string;
 }
@@ -443,32 +452,68 @@ async function getStoredVivaSessions(userId?: string): Promise<VivaSession[]> {
   try {
     const admin = createAdminClient();
     let q = admin.from('viva_sessions').select('*').order('created_at', { ascending: false });
-    if (userId) q = q.eq('user_id', userId);
+    if (userId && userId !== 'all') q = q.eq('user_id', userId);
     const { data, error } = await q;
     if (!error && Array.isArray(data)) {
-      return data.map((r: any) => ({
-        id: r.id,
-        userId: r.user_id,
-        subjectId: r.subject_id,
-        deckId: r.deck_id,
-        documentId: r.document_id || undefined,
-        topicTitle: r.title || 'General Academic Topic',
-        vivaMode: r.viva_mode,
-        difficulty: r.difficulty,
-        totalQuestions: r.total_questions,
-        status: r.status,
-        currentQuestionIndex: r.current_question_index || 1,
-        overallScore: r.overall_score ? Number(r.overall_score) : undefined,
-        accuracyScore: r.accuracy_score ? Number(r.accuracy_score) : undefined,
-        depthScore: r.depth_score ? Number(r.depth_score) : undefined,
-        clarityScore: r.clarity_score ? Number(r.clarity_score) : undefined,
-        evaluationSummary: r.evaluation_summary || undefined,
-        createdAt: r.created_at,
-        completedAt: r.completed_at || undefined,
-      }));
+      return data.map((r: any) => {
+        const meta = typeof r.target_topics === 'object' && r.target_topics !== null && !Array.isArray(r.target_topics)
+          ? r.target_topics
+          : {};
+        const turnsList: VivaResponse[] = Array.isArray(r.turns)
+          ? r.turns.map((t: any) => ({
+              id: t.id || uuidv4(),
+              sessionId: r.id,
+              userId: r.user_id,
+              questionIndex: t.questionIndex ?? t.question_index ?? 1,
+              questionText: t.questionText ?? t.question_text ?? '',
+              studentResponse: t.studentResponse ?? t.student_response ?? '',
+              isVoice: Boolean(t.isVoice ?? t.is_voice),
+              score: typeof t.score === 'number' ? t.score : 0,
+              evaluationStatus: t.evaluationStatus ?? t.evaluation_status ?? (t.score >= 8 ? 'correct' : t.score >= 5 ? 'partially_correct' : 'incorrect'),
+              feedback: t.feedback || '',
+              strengths: t.strengths || [],
+              missingPoints: t.missingPoints ?? t.missing_points ?? [],
+              technicalInaccuracies: t.technicalInaccuracies ?? t.technical_inaccuracies ?? [],
+              idealAnswer: t.idealAnswer ?? t.ideal_answer ?? '',
+              suggestions: t.suggestions || [],
+              followUpQuestion: t.followUpQuestion ?? t.follow_up_question ?? null,
+              createdAt: t.createdAt ?? t.created_at ?? new Date().toISOString(),
+            }))
+          : [];
+
+        return {
+          id: r.id,
+          userId: r.user_id,
+          deckId: r.deck_id,
+          subjectId: meta.subjectId || null,
+          documentId: meta.documentId || null,
+          sourceType: meta.sourceType || (meta.documentId ? 'document' : r.deck_id ? 'deck' : 'custom'),
+          sourceTitle: meta.sourceTitle || undefined,
+          topicTitle: r.topic_title || r.title || 'General Academic Topic',
+          vivaMode: meta.vivaMode || 'comprehensive',
+          difficulty: meta.difficulty || 'intermediate',
+          totalQuestions: Number(meta.totalQuestions) || 5,
+          status: r.status === 'completed' ? 'completed' : 'in_progress',
+          currentQuestionIndex: r.current_question_index || 1,
+          overallScore: r.final_score != null ? Number(r.final_score) : undefined,
+          accuracyScore: meta.accuracyScore != null ? Number(meta.accuracyScore) : undefined,
+          depthScore: meta.depthScore != null ? Number(meta.depthScore) : undefined,
+          clarityScore: meta.clarityScore != null ? Number(meta.clarityScore) : undefined,
+          evaluationSummary: {
+            strengths: Array.isArray(r.strengths) ? r.strengths : [],
+            improvements: Array.isArray(r.weaknesses) ? r.weaknesses : [],
+            overallCritique: r.feedback || '',
+          },
+          turns: turnsList,
+          createdAt: r.created_at,
+          completedAt: r.status === 'completed' ? r.updated_at : undefined,
+        };
+      });
+    } else if (error) {
+      console.warn('[getStoredVivaSessions] Supabase query notice:', error.message);
     }
   } catch (err: any) {
-    console.warn('[getStoredVivaSessions] Supabase notice:', err?.message);
+    console.warn('[getStoredVivaSessions] Exception:', err?.message);
   }
   return demoIntelVivaSessions;
 }
@@ -482,86 +527,163 @@ async function saveStoredVivaSessions(sessions: VivaSession[]): Promise<void> {
     }
     try {
       const admin = createAdminClient();
-      await admin.from('viva_sessions').upsert({
+      const targetTopicsData = {
+        vivaMode: s.vivaMode || 'comprehensive',
+        difficulty: s.difficulty || 'intermediate',
+        totalQuestions: s.totalQuestions || 5,
+        documentId: s.documentId || null,
+        sourceType: s.sourceType || 'custom',
+        sourceTitle: s.sourceTitle || null,
+        subjectId: s.subjectId || null,
+        accuracyScore: s.accuracyScore || null,
+        depthScore: s.depthScore || null,
+        clarityScore: s.clarityScore || null,
+      };
+
+      const serializedTurns = (s.turns || []).map((t) => ({
+        id: t.id,
+        question_index: t.questionIndex,
+        question_text: t.questionText,
+        student_response: t.studentResponse,
+        is_voice: Boolean(t.isVoice),
+        score: t.score,
+        evaluation_status: t.evaluationStatus,
+        feedback: t.feedback,
+        strengths: t.strengths || [],
+        missing_points: t.missingPoints || [],
+        technical_inaccuracies: t.technicalInaccuracies || [],
+        ideal_answer: t.idealAnswer || '',
+        suggestions: t.suggestions || [],
+        follow_up_question: t.followUpQuestion || null,
+        created_at: t.createdAt || new Date().toISOString(),
+      }));
+
+      const { error: upsertErr } = await admin.from('viva_sessions').upsert({
         id: s.id,
         user_id: s.userId,
-        subject_id: isUUID(s.subjectId) ? s.subjectId : null,
         deck_id: isUUID(s.deckId) ? s.deckId : null,
-        document_id: s.documentId || null,
-        title: s.topicTitle,
-        viva_mode: s.vivaMode,
-        difficulty: s.difficulty,
-        total_questions: s.totalQuestions,
-        status: s.status,
-        overall_score: s.overallScore || null,
-        accuracy_score: s.accuracyScore || null,
-        depth_score: s.depthScore || null,
-        clarity_score: s.clarityScore || null,
-        evaluation_summary: s.evaluationSummary || {},
-        created_at: s.createdAt,
-        completed_at: s.completedAt || null,
+        title: s.topicTitle || 'Viva Voce Examination',
+        topic_title: s.topicTitle || 'General Academic Topic',
+        target_topics: targetTopicsData,
+        current_question_index: s.currentQuestionIndex || 1,
+        status: s.status === 'completed' ? 'completed' : 'active',
+        turns: serializedTurns,
+        final_score: typeof s.overallScore === 'number' ? s.overallScore : null,
+        feedback: s.evaluationSummary?.overallCritique || null,
+        strengths: s.evaluationSummary?.strengths || [],
+        weaknesses: s.evaluationSummary?.improvements || [],
+        created_at: s.createdAt || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       }, { onConflict: 'id' });
+
+      if (upsertErr) {
+        console.error('[saveStoredVivaSessions] Supabase upsert error:', upsertErr.message);
+      }
     } catch (err: any) {
-      console.warn('[saveStoredVivaSessions] Supabase notice:', err?.message);
+      console.warn('[saveStoredVivaSessions] Exception:', err?.message);
     }
   }
 }
 
-async function getStoredVivaResponses(sessionId?: string): Promise<VivaResponse[]> {
+async function getStoredVivaResponses(sessionId?: string, userId?: string): Promise<VivaResponse[]> {
   if (!sessionId) return demoIntelVivaResponses;
+  if (userId === 'demo-guest-user') {
+    return demoIntelVivaResponses.filter((r) => r.sessionId === sessionId);
+  }
   try {
     const admin = createAdminClient();
     const { data, error } = await admin
-      .from('viva_responses')
-      .select('*')
-      .eq('session_id', sessionId)
-      .order('question_index', { ascending: true });
+      .from('viva_sessions')
+      .select('turns, user_id')
+      .eq('id', sessionId)
+      .single();
 
-    if (!error && Array.isArray(data)) {
-      return data.map((r: any) => ({
-        id: r.id,
-        sessionId: r.session_id,
-        userId: r.user_id,
-        questionIndex: r.question_index,
-        questionText: r.question_text,
-        studentResponse: r.student_response,
-        isVoice: Boolean(r.is_voice),
-        score: Number(r.score) || 0,
-        feedback: r.feedback,
-        followUpQuestion: r.follow_up_question || undefined,
-        createdAt: r.created_at,
+    if (!error && data && Array.isArray(data.turns)) {
+      return data.turns.map((t: any) => ({
+        id: t.id || uuidv4(),
+        sessionId,
+        userId: data.user_id || userId || '',
+        questionIndex: t.questionIndex ?? t.question_index ?? 1,
+        questionText: t.questionText ?? t.question_text ?? '',
+        studentResponse: t.studentResponse ?? t.student_response ?? '',
+        isVoice: Boolean(t.isVoice ?? t.is_voice),
+        score: typeof t.score === 'number' ? t.score : 0,
+        evaluationStatus: t.evaluationStatus ?? t.evaluation_status ?? (t.score >= 8 ? 'correct' : t.score >= 5 ? 'partially_correct' : 'incorrect'),
+        feedback: t.feedback || '',
+        strengths: t.strengths || [],
+        missingPoints: t.missingPoints ?? t.missing_points ?? [],
+        technicalInaccuracies: t.technicalInaccuracies ?? t.technical_inaccuracies ?? [],
+        idealAnswer: t.idealAnswer ?? t.ideal_answer ?? '',
+        suggestions: t.suggestions || [],
+        followUpQuestion: t.followUpQuestion ?? t.follow_up_question ?? null,
+        createdAt: t.createdAt ?? t.created_at ?? new Date().toISOString(),
       }));
     }
   } catch (err: any) {
-    console.warn('[getStoredVivaResponses] Supabase notice:', err?.message);
+    console.warn('[getStoredVivaResponses] Exception:', err?.message);
   }
   return demoIntelVivaResponses.filter((r) => r.sessionId === sessionId);
 }
 
 async function saveStoredVivaResponses(responses: VivaResponse[]): Promise<void> {
-  for (const r of responses) {
-    if (r.userId === 'demo-guest-user') {
-      demoIntelVivaResponses.push(r);
-      continue;
-    }
-    try {
-      const admin = createAdminClient();
-      await admin.from('viva_responses').upsert({
+  if (responses.length === 0) return;
+  const sessionId = responses[0].sessionId;
+  const userId = responses[0].userId;
+
+  if (userId === 'demo-guest-user') {
+    responses.forEach((r) => {
+      const idx = demoIntelVivaResponses.findIndex((x) => x.id === r.id);
+      if (idx >= 0) demoIntelVivaResponses[idx] = r; else demoIntelVivaResponses.push(r);
+    });
+    return;
+  }
+
+  try {
+    const admin = createAdminClient();
+    const { data: currentSession } = await admin
+      .from('viva_sessions')
+      .select('turns')
+      .eq('id', sessionId)
+      .single();
+
+    const existingTurns = (currentSession && Array.isArray(currentSession.turns)) ? currentSession.turns : [];
+    const updatedTurns = [...existingTurns];
+
+    for (const r of responses) {
+      const turnObj = {
         id: r.id,
-        session_id: r.sessionId,
-        user_id: r.userId,
         question_index: r.questionIndex,
         question_text: r.questionText,
         student_response: r.studentResponse,
-        is_voice: r.isVoice,
+        is_voice: Boolean(r.isVoice),
         score: r.score,
+        evaluation_status: r.evaluationStatus,
         feedback: r.feedback,
+        strengths: r.strengths || [],
+        missing_points: r.missingPoints || [],
+        technical_inaccuracies: r.technicalInaccuracies || [],
+        ideal_answer: r.idealAnswer || '',
+        suggestions: r.suggestions || [],
         follow_up_question: r.followUpQuestion || null,
-        created_at: r.createdAt,
-      }, { onConflict: 'id' });
-    } catch (err: any) {
-      console.warn('[saveStoredVivaResponses] Supabase notice:', err?.message);
+        created_at: r.createdAt || new Date().toISOString(),
+      };
+      const existingIdx = updatedTurns.findIndex((t: any) => t.id === r.id || t.question_index === r.questionIndex);
+      if (existingIdx >= 0) {
+        updatedTurns[existingIdx] = turnObj;
+      } else {
+        updatedTurns.push(turnObj);
+      }
     }
+
+    await admin
+      .from('viva_sessions')
+      .update({
+        turns: updatedTurns,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', sessionId);
+  } catch (err: any) {
+    console.warn('[saveStoredVivaResponses] Exception:', err?.message);
   }
 }
 
@@ -1259,6 +1381,62 @@ export interface StartVivaParams {
   subjectId?: string | null;
   deckId?: string | null;
   documentId?: string | null;
+  sourceType?: 'document' | 'deck' | 'custom';
+  sourceTitle?: string;
+}
+
+async function getStudyMaterialContext(params: {
+  userId: string;
+  documentId?: string | null;
+  deckId?: string | null;
+  sourceType?: 'document' | 'deck' | 'custom';
+}): Promise<{ sourceTitle?: string; contentSnippet?: string }> {
+  const { userId, documentId, deckId } = params;
+  try {
+    const admin = createAdminClient();
+    if (documentId) {
+      const { data: chunks } = await admin
+        .from('document_chunks')
+        .select('content, heading')
+        .eq('document_id', documentId)
+        .order('chunk_index', { ascending: true })
+        .limit(6);
+
+      if (chunks && chunks.length > 0) {
+        const text = chunks.map(c => (c.heading ? `${c.heading}:\n${c.content}` : c.content)).join('\n\n');
+        return { contentSnippet: text.slice(0, 3500) };
+      }
+
+      const { data: doc } = await admin
+        .from('documents')
+        .select('file_name, parsed_text')
+        .eq('id', documentId)
+        .maybeSingle();
+
+      if (doc) {
+        return {
+          sourceTitle: doc.file_name,
+          contentSnippet: (doc.parsed_text || '').slice(0, 3500),
+        };
+      }
+    }
+
+    if (deckId) {
+      const { data: cards } = await admin
+        .from('flashcards')
+        .select('front, back')
+        .eq('deck_id', deckId)
+        .limit(15);
+
+      if (cards && cards.length > 0) {
+        const text = cards.map((c, i) => `Card ${i + 1} (${c.front}): ${c.back}`).join('\n\n');
+        return { contentSnippet: text.slice(0, 3500) };
+      }
+    }
+  } catch (e) {
+    console.warn('[Viva] Error fetching study material context:', e);
+  }
+  return {};
 }
 
 export async function startVivaSession(params: StartVivaParams): Promise<{
@@ -1274,21 +1452,35 @@ export async function startVivaSession(params: StartVivaParams): Promise<{
     subjectId = null,
     deckId = null,
     documentId = null,
+    sourceType = documentId ? 'document' : deckId ? 'deck' : 'custom',
+    sourceTitle,
   } = params;
 
+  const materialContext = await getStudyMaterialContext({
+    userId,
+    documentId,
+    deckId,
+    sourceType,
+  });
+
+  const resolvedSourceTitle = sourceTitle || materialContext.sourceTitle || topicTitle.trim();
   const sessionId = uuidv4();
+
   const session: VivaSession = {
     id: sessionId,
     userId,
     subjectId,
     deckId,
     documentId,
-    topicTitle: topicTitle.trim() || 'General Academic Topic',
+    sourceType,
+    sourceTitle: resolvedSourceTitle,
+    topicTitle: topicTitle.trim() || resolvedSourceTitle || 'General Academic Topic',
     vivaMode,
     difficulty,
     totalQuestions,
     status: 'in_progress',
     currentQuestionIndex: 1,
+    turns: [],
     createdAt: new Date().toISOString(),
   };
 
@@ -1299,14 +1491,16 @@ export async function startVivaSession(params: StartVivaParams): Promise<{
   if (aiConfig) {
     try {
       const prompt = `You are a distinguished university professor conducting an oral viva examination (viva voce).
-Topic: "${session.topicTitle}"
+Topic / Subject: "${session.topicTitle}"
+${resolvedSourceTitle ? `Study Material Reference: "${resolvedSourceTitle}"` : ''}
 Viva Mode: ${vivaMode}
 Difficulty Level: ${difficulty}
+${materialContext.contentSnippet ? `\nSOURCE MATERIAL EXCERPT:\n${materialContext.contentSnippet}\n\nGround your question strictly in the concepts presented in this study material.` : ''}
 
 Formulate the OPENING QUESTION (Question 1 of ${totalQuestions}).
 Tone: Rigorous, encouraging, articulate.
 Ask ONE clear, thought-provoking question that tests the student's foundational grasp.
-Output ONLY the question text without any greetings or meta-commentary.`;
+Output ONLY the question text without greetings, introductory meta-commentary, or surrounding quotation marks.`;
 
       const completion = await withAiRetry(() =>
         aiConfig.client.chat.completions.create({
@@ -1317,7 +1511,7 @@ Output ONLY the question text without any greetings or meta-commentary.`;
       );
 
       const generated = completion.choices[0]?.message?.content?.trim();
-      if (generated) firstQuestion = generated;
+      if (generated) firstQuestion = generated.replace(/^["']|["']$/g, '');
     } catch (e) {
       console.warn('[Viva] Question generation fallback:', e);
     }
@@ -1341,7 +1535,13 @@ export interface EvaluateVivaTurnParams {
 export async function evaluateVivaTurn(params: EvaluateVivaTurnParams): Promise<{
   evaluation: {
     score: number; // 0 - 10
+    evaluationStatus: 'correct' | 'partially_correct' | 'incorrect';
     feedback: string;
+    strengths: string[];
+    missingPoints: string[];
+    technicalInaccuracies: string[];
+    idealAnswer: string;
+    suggestions: string[];
     followUpQuestion?: string | null;
     isComplete: boolean;
     finalSummary?: {
@@ -1366,32 +1566,84 @@ export async function evaluateVivaTurn(params: EvaluateVivaTurnParams): Promise<
   const session = sessions[sessionIdx];
   const aiConfig = getAIClientAndModel();
 
-  let score = 7.5;
-  let feedback = 'Good grasp of the foundational terminology. Make sure to connect the concept to practical edge cases.';
+  const normalizedResponse = (studentResponse || '').trim().toLowerCase();
+  const isDontKnow =
+    normalizedResponse.length === 0 ||
+    /^(i don'?t know|no idea|i have no idea|not sure|i am not sure|idk|pass|skip|no clue|can you explain|don'?t know)\.?$/i.test(normalizedResponse) ||
+    (normalizedResponse.length < 15 && (normalizedResponse.includes("don't know") || normalizedResponse.includes("not sure") || normalizedResponse.includes("no idea")));
+
+  let score = isDontKnow ? 0.0 : 7.5;
+  let evaluationStatus: 'correct' | 'partially_correct' | 'incorrect' = isDontKnow ? 'incorrect' : 'partially_correct';
+  let feedback = isDontKnow
+    ? 'You indicated that you do not know the answer to this question. In an oral viva, admitting uncertainty is better than guessing, but make sure to review this core concept.'
+    : 'Good grasp of the foundational terminology. Make sure to connect the concept to practical edge cases.';
+  let strengths: string[] = isDontKnow ? [] : ['Attempted to address the core question', 'Demonstrated basic awareness of the domain'];
+  let missingPoints: string[] = ['Core formal definition', 'Step-by-step operational mechanism'];
+  let technicalInaccuracies: string[] = [];
+  let idealAnswer = `In academic examinations, a complete answer defines the core entity, explains its underlying mechanism, and discusses practical trade-offs.`;
+  let suggestions: string[] = ['Structure your response using: Definition, Key Components, and Practical Example.'];
   let followUpQuestion: string | null = null;
 
   if (aiConfig) {
     try {
       const isLastQuestion = questionIndex >= session.totalQuestions;
 
-      const evalPrompt = `You are an expert oral viva examiner evaluating a student's spoken/written answer.
-Topic: "${session.topicTitle}"
+      let evalPrompt = '';
+      if (isDontKnow) {
+        evalPrompt = `You are an expert viva voce oral examiner. The student was asked:
+Question (${questionIndex} of ${session.totalQuestions}): "${questionText}"
+The student responded: "${studentResponse}" (indicating they do not know).
+
+TASK:
+1. Provide gentle, constructive spoken feedback acknowledging their answer and explaining the core principle in 2 sentences.
+2. Formulate an ideal academic model answer (2-3 sentences) they can learn from.
+${!isLastQuestion ? `3. Formulate Question ${questionIndex + 1} of ${session.totalQuestions} on an accessible adjacent topic.` : '3. Since this is the final question, set followUpQuestion to null.'}
+
+STRICT JSON OUTPUT:
+{
+  "score": 0.0,
+  "evaluationStatus": "incorrect",
+  "feedback": "Spoken examiner commentary here.",
+  "strengths": [],
+  "missingPoints": ["Complete conceptual definition", "Operational mechanism"],
+  "technicalInaccuracies": [],
+  "idealAnswer": "Concise high-scoring model answer.",
+  "suggestions": ["Review foundational definitions in your course notes", "Focus on core workflows before advanced nuances"],
+  "followUpQuestion": ${!isLastQuestion ? '"Next oral question here"' : 'null'}
+}`;
+      } else {
+        evalPrompt = `You are a distinguished university professor conducting an oral viva voce examination.
+Subject/Topic: "${session.topicTitle}"
+${session.sourceTitle ? `Study Material Reference: "${session.sourceTitle}"` : ''}
 Viva Mode: ${session.vivaMode}
 Difficulty: ${session.difficulty}
 Current Question (${questionIndex} of ${session.totalQuestions}): "${questionText}"
 Student Answer: "${studentResponse}"
 
-EVALUATE:
-1. Score the answer from 0.0 to 10.0 based on factual correctness, depth, and articulation.
-2. Provide constructive, direct spoken feedback (2-3 sentences).
-${!isLastQuestion ? `3. Provide Question ${questionIndex + 1} of ${session.totalQuestions} (or a probing follow-up if their answer missed an important nuance).` : '3. Since this is the final question, set followUpQuestion to null.'}
+EVALUATE RIGOROUSLY WITH DETAILED ACADEMIC RUBRIC:
+1. "score": Number from 0.0 to 10.0 (where 0 is completely uninformative or incorrect, 4.0-7.0 is partial/basic, 7.5-10.0 is accurate, articulate and comprehensive).
+2. "evaluationStatus": One of "correct" (score >= 7.5), "partially_correct" (score >= 4.0 and < 7.5), or "incorrect" (score < 4.0).
+3. "feedback": Spoken examiner feedback directly addressing the student (2-3 sentences, verbal professorial tone).
+4. "strengths": Array of 1-3 specific valid points or concepts the student articulated well.
+5. "missingPoints": Array of 1-3 crucial technical details, edge cases, or definitions they omitted.
+6. "technicalInaccuracies": Array of any misconceptions, incorrect terms, or factual errors (empty array if none).
+7. "idealAnswer": Clear, exemplary 2-3 sentence model answer demonstrating ideal oral academic delivery.
+8. "suggestions": Array of 1-2 actionable tips for how the student can improve their verbal defense of this topic.
+9. "followUpQuestion": ${!isLastQuestion ? `Formulate Question ${questionIndex + 1} of ${session.totalQuestions} progressing naturally in depth or exploring an adjacent concept in the topic.` : 'null (since this is the final question)'}
 
-STRICT JSON OUTPUT:
+STRICT JSON OUTPUT FORMAT ONLY:
 {
   "score": 8.0,
+  "evaluationStatus": "correct",
   "feedback": "Examiner verbal feedback here.",
+  "strengths": ["Strengths here"],
+  "missingPoints": ["Missing points here"],
+  "technicalInaccuracies": [],
+  "idealAnswer": "Exemplary model answer here.",
+  "suggestions": ["Specific oral defense tip"],
   "followUpQuestion": ${!isLastQuestion ? '"Next oral question here"' : 'null'}
 }`;
+      }
 
       const completion = await withAiRetry(() =>
         aiConfig.client.chat.completions.create({
@@ -1403,9 +1655,17 @@ STRICT JSON OUTPUT:
       );
 
       const parsed = JSON.parse(completion.choices[0]?.message?.content || '{}');
-      if (typeof parsed.score === 'number') score = Math.max(0, Math.min(10, parsed.score));
+      if (typeof parsed.score === 'number') {
+        score = Math.max(0, Math.min(10, Math.round(parsed.score * 10) / 10));
+      }
+      evaluationStatus = parsed.evaluationStatus || (score >= 7.5 ? 'correct' : score >= 4.0 ? 'partially_correct' : 'incorrect');
       if (parsed.feedback) feedback = parsed.feedback;
-      if (parsed.followUpQuestion) followUpQuestion = parsed.followUpQuestion;
+      if (Array.isArray(parsed.strengths)) strengths = parsed.strengths;
+      if (Array.isArray(parsed.missingPoints)) missingPoints = parsed.missingPoints;
+      if (Array.isArray(parsed.technicalInaccuracies)) technicalInaccuracies = parsed.technicalInaccuracies;
+      if (parsed.idealAnswer) idealAnswer = parsed.idealAnswer;
+      if (Array.isArray(parsed.suggestions)) suggestions = parsed.suggestions;
+      if (parsed.followUpQuestion) followUpQuestion = parsed.followUpQuestion.replace(/^["']|["']$/g, '');
     } catch (e) {
       console.warn('[Viva] AI evaluation fallback:', e);
     }
@@ -1422,14 +1682,23 @@ STRICT JSON OUTPUT:
     studentResponse,
     isVoice,
     score,
+    evaluationStatus,
     feedback,
+    strengths,
+    missingPoints,
+    technicalInaccuracies,
+    idealAnswer,
+    suggestions,
     followUpQuestion,
     createdAt: new Date().toISOString(),
   };
-  await saveStoredVivaResponses([...responses, newResponse]);
+
+  const updatedTurns = [...responses.filter(r => r.sessionId === sessionId), newResponse];
+  await saveStoredVivaResponses(updatedTurns);
 
   const isComplete = questionIndex >= session.totalQuestions;
   session.currentQuestionIndex = questionIndex + 1;
+  session.turns = updatedTurns;
 
   let finalSummary: any = null;
 
@@ -1437,31 +1706,32 @@ STRICT JSON OUTPUT:
     session.status = 'completed';
     session.completedAt = new Date().toISOString();
 
-    // Calculate aggregated scores from all turns
-    const sessionResponses = [...responses.filter(r => r.sessionId === sessionId), newResponse];
-    const avgScore = sessionResponses.length > 0
-      ? sessionResponses.reduce((acc, r) => acc + r.score, 0) / sessionResponses.length
+    const avgScore = updatedTurns.length > 0
+      ? updatedTurns.reduce((acc, r) => acc + r.score, 0) / updatedTurns.length
       : score;
 
-    const overallScorePercent = Math.round(avgScore * 10);
-    const accuracyScore = Math.min(100, Math.round(overallScorePercent * 1.02));
-    const depthScore = Math.max(0, Math.round(overallScorePercent * 0.95));
-    const clarityScore = Math.round(overallScorePercent);
+    const overallScorePercent = Math.min(100, Math.max(0, Math.round(avgScore * 10)));
+    const accuracyScore = Math.min(100, Math.max(0, Math.round(overallScorePercent * 1.02)));
+    const depthScore = Math.min(100, Math.max(0, Math.round(overallScorePercent * 0.95)));
+    const clarityScore = overallScorePercent;
+
+    const aggregatedStrengths = Array.from(new Set(updatedTurns.flatMap(t => t.strengths || []))).slice(0, 4);
+    const aggregatedImprovements = Array.from(new Set(updatedTurns.flatMap(t => t.suggestions || t.missingPoints || []))).slice(0, 4);
 
     finalSummary = {
       overallScore: overallScorePercent,
       accuracyScore,
       depthScore,
       clarityScore,
-      strengths: [
+      strengths: aggregatedStrengths.length > 0 ? aggregatedStrengths : [
         'Clear articulation of core definitions and entities',
         'Strong conceptual grounding under examiner questioning',
       ],
-      improvements: [
+      improvements: aggregatedImprovements.length > 0 ? aggregatedImprovements : [
         'Deepen technical specificity when explaining edge-case constraints',
         'Incorporate explicit real-world or architectural examples',
       ],
-      overallCritique: `Completed ${session.totalQuestions}-question viva with an overall rating of ${overallScorePercent}%. Demonstrated solid academic competence.`,
+      overallCritique: `Completed ${session.totalQuestions}-question viva with an overall rating of ${overallScorePercent}%. Demonstrated solid academic competence across oral examination turns.`,
     };
 
     session.overallScore = overallScorePercent;
@@ -1479,7 +1749,13 @@ STRICT JSON OUTPUT:
   return {
     evaluation: {
       score,
+      evaluationStatus,
       feedback,
+      strengths,
+      missingPoints,
+      technicalInaccuracies,
+      idealAnswer,
+      suggestions,
       followUpQuestion,
       isComplete,
       finalSummary,

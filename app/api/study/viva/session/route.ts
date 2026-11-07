@@ -41,6 +41,8 @@ export async function POST(req: NextRequest) {
       subjectId,
       deckId,
       documentId,
+      sourceType,
+      sourceTitle,
     } = body;
 
     if (!topicTitle || !topicTitle.trim()) {
@@ -59,6 +61,8 @@ export async function POST(req: NextRequest) {
       subjectId,
       deckId,
       documentId,
+      sourceType,
+      sourceTitle,
     });
 
     return NextResponse.json({

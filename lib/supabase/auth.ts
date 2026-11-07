@@ -170,18 +170,56 @@ export async function signInUserWithSupabase(
  * Signs out the current user from Supabase and clears all local auth tokens and cookies.
  */
 export async function signOutUserFromSupabase(): Promise<void> {
+  if (typeof window === 'undefined') return;
+
   try {
     if (isSupabaseConfigured()) {
       const supabase = createClient();
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {});
+      await supabase.auth.signOut().catch(() => {});
     }
   } catch (e) {
     console.warn('Supabase signOut error:', e);
   } finally {
     persistSupabaseUser(null);
-    if (typeof document !== 'undefined') {
-      document.cookie = 'notionwell_demo_session=; path=/; max-age=0; SameSite=Lax';
+
+    // Clear all session markers in localStorage
+    try {
+      localStorage.removeItem('notionwell_user_v1');
+      localStorage.removeItem('notionwell_session_v1');
+      localStorage.removeItem('notionwell_account_v1');
+      localStorage.removeItem('studypack_session_v1');
+      localStorage.removeItem('studypack_account_v1');
+
+      // Clear any sb-* tokens in localStorage
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('sb-') || key.startsWith('notionwell_'))) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage cleanup error on logout:', e);
     }
+
+    // Clear all auth cookies across paths and domains
+    try {
+      if (typeof document !== 'undefined') {
+        document.cookie = 'notionwell_demo_session=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
+        const cookieList = document.cookie.split(';');
+        for (const c of cookieList) {
+          const eqIdx = c.indexOf('=');
+          const name = eqIdx > -1 ? c.substring(0, eqIdx).trim() : c.trim();
+          if (name.startsWith('sb-') || name.startsWith('notionwell_')) {
+            document.cookie = `${name}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Cookie cleanup error on logout:', e);
+    }
+
+    window.dispatchEvent(new Event('auth-change'));
   }
 }
 

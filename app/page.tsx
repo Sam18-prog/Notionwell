@@ -37,9 +37,6 @@ export default function LandingPage() {
   const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
-  // Hero interactive email state
-  const [emailInput, setEmailInput] = useState('');
-
   // Interactive preview card flip state
   const [previewFlipped, setPreviewFlipped] = useState(false);
 
@@ -68,15 +65,6 @@ export default function LandingPage() {
     const next = theme === 'light' ? 'dark' : 'light';
     setTheme(next);
     setStoredTheme(next);
-  };
-
-  const handleEmailSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (emailInput.trim()) {
-      router.push(`/auth?tab=signup&email=${encodeURIComponent(emailInput.trim())}`);
-    } else {
-      router.push('/auth?tab=signup');
-    }
   };
 
   const faqItems = [
@@ -177,38 +165,19 @@ export default function LandingPage() {
               </button>
             )}
 
-            {user ? (
-              <Link
-                href="/dashboard"
-                className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-xs sm:text-sm font-bold shadow-md hover:scale-[1.01] transition-all"
-              >
-                <span>Dashboard</span>
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-            ) : (
-              <>
-                <Link
-                  href="/auth"
-                  className="px-3 py-2 text-xs sm:text-sm font-semibold text-[#334155] dark:text-[#CBD5E1] hover:text-[#0F172A] dark:hover:text-white transition-colors"
-                >
-                  Login
-                </Link>
+            <Link
+              href="/auth"
+              className="px-3 py-2 text-xs sm:text-sm font-semibold text-[#334155] dark:text-[#CBD5E1] hover:text-[#0F172A] dark:hover:text-white transition-colors"
+            >
+              Login
+            </Link>
 
-                <Link
-                  href="/demo"
-                  className="px-5 py-2 rounded-full border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#111827] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] text-[#0F172A] dark:text-[#F8FAFC] text-xs sm:text-sm font-semibold transition-all shadow-xs"
-                >
-                  Get a demo
-                </Link>
-
-                <Link
-                  href="/auth?tab=signup"
-                  className="px-5 py-2 rounded-full bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-xs sm:text-sm font-semibold shadow-xs hover:scale-[1.01] transition-all"
-                >
-                  Enrol now
-                </Link>
-              </>
-            )}
+            <Link
+              href="/demo"
+              className="px-5 py-2 rounded-full border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#111827] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] text-[#0F172A] dark:text-[#F8FAFC] text-xs sm:text-sm font-semibold transition-all shadow-xs"
+            >
+              Get a demo
+            </Link>
           </div>
         </div>
       </header>
@@ -230,37 +199,23 @@ export default function LandingPage() {
             you master new skills and turn your notes into knowledge.
           </p>
 
-          {/* CAPSULE FORM (MATCHING REFERENCE PILL CONTAINER) */}
-          <form
-            onSubmit={handleEmailSubmit}
-            className="max-w-[530px] mx-auto rounded-full bg-white dark:bg-[#111827] border border-[#BFDBFE] dark:border-[#1E3A8A] p-1.5 pl-6 shadow-[0_10px_35px_rgba(37,99,235,0.08)] flex items-center justify-between transition-all focus-within:ring-2 focus-within:ring-[#2563EB]"
-          >
-            <input
-              type="email"
-              value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
-              placeholder="Personal email"
-              className="flex-1 bg-transparent text-xs sm:text-sm text-[#0F172A] dark:text-white placeholder-[#94A3B8] outline-none pr-3"
-            />
-            <button
-              type="submit"
-              className="px-7 py-3 rounded-full bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-xs sm:text-sm font-semibold shadow-xs hover:scale-[1.01] transition-all shrink-0"
+          {/* HERO CALL-TO-ACTION BUTTONS */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 pt-1">
+            <Link
+              href="/auth"
+              className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-xs sm:text-sm font-semibold shadow-xs hover:scale-[1.01] transition-all cursor-pointer"
             >
-              Enrol for free
-            </button>
-          </form>
-
-          {/* PRIVACY MICROCOPY (UNDER CAPSULE) */}
-          <p className="text-[11px] sm:text-xs text-[#64748B] dark:text-[#94A3B8]">
-            By submitting this form, you agree to the Notionwell{' '}
-            <Link href="/terms" className="underline hover:text-[#2563EB]">
-              Terms of Use
-            </Link>{' '}
-            &amp;{' '}
-            <Link href="/privacy" className="underline hover:text-[#2563EB]">
-              Privacy Policy
+              <span>Start Learning</span>
+              <ArrowRight className="w-4 h-4" />
             </Link>
-          </p>
+
+            <Link
+              href="/demo"
+              className="px-6 py-2.5 rounded-full border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#111827] hover:bg-[#F8FAFC] dark:hover:bg-[#1E293B] text-[#0F172A] dark:text-[#F8FAFC] text-xs sm:text-sm font-semibold shadow-xs transition-all cursor-pointer"
+            >
+              Get a demo
+            </Link>
+          </div>
 
           {/* ================================================================ */}
           {/* HERO PRODUCT PREVIEW WINDOW (PIXEL-PERFECT MATCH TO SCREENSHOT) */}
@@ -354,12 +309,12 @@ export default function LandingPage() {
                         Your current progress &amp; activity
                       </p>
                     </div>
-                    <Link
-                      href="/create"
-                      className="px-3.5 py-1.5 rounded-xl bg-[#1D4ED8] hover:bg-[#1E40AF] text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
+                    <span
+                      className="px-3.5 py-1.5 rounded-xl bg-[#1D4ED8] text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs cursor-default select-none pointer-events-none"
+                      aria-hidden="true"
                     >
                       <span>+ New Course</span>
-                    </Link>
+                    </span>
                   </div>
 
                   {/* 4 STATS CARDS (EXACT METRICS & BADGES AS SCREENSHOT) */}

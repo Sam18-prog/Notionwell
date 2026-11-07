@@ -43,10 +43,10 @@ export default function Navbar() {
     setStoredTheme(nextTheme);
   };
 
-  const handleLogout = () => {
-    logoutUser();
+  const handleLogout = async () => {
     setUser(null);
-    router.push('/auth');
+    await logoutUser();
+    window.location.href = '/auth';
   };
 
   return (

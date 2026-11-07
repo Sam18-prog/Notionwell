@@ -7,6 +7,7 @@ import {
   signInUserWithSupabase,
   resetPasswordWithSupabase,
   initSupabaseAuthListener,
+  persistSupabaseUser,
 } from '@/lib/supabase/auth';
 import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
 import {
@@ -29,7 +30,8 @@ function AuthForm() {
   const redirectTarget = rawRedirect && rawRedirect !== '/' ? rawRedirect : '/dashboard';
   const urlError = searchParams?.get('error');
 
-  const [tab, setTab] = useState<'login' | 'signup' | 'forgot'>('login');
+  const initialTab = searchParams?.get('tab') === 'signup' ? 'signup' : 'login';
+  const [tab, setTab] = useState<'login' | 'signup' | 'forgot'>(initialTab);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -44,16 +46,54 @@ function AuthForm() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    initSupabaseAuthListener();
+    let isMounted = true;
 
-    if (isSupabaseConfigured()) {
-      const supabase = createClient();
-      supabase.auth.getUser().then(({ data }) => {
-        if (data.user) {
+    if (!isSupabaseConfigured()) {
+      return;
+    }
+
+    const supabase = createClient();
+
+    // Check if an existing valid session is already established
+    supabase.auth.getSession().then(({ data: { session }, error: sessionErr }) => {
+      if (!isMounted) return;
+
+      if (!session || sessionErr) {
+        // Case 1: No existing valid session. User remains on the login page unauthenticated.
+        persistSupabaseUser(null);
+        return;
+      }
+
+      // Case 2: Verify active session with the Supabase auth server
+      supabase.auth.getUser().then(({ data: { user }, error: userErr }) => {
+        if (!isMounted) return;
+
+        if (user && !userErr) {
+          // Valid verified existing session -> redirect to target
           router.push(redirectTarget);
+        } else {
+          // Case 3: Expired or invalid session -> clean up and allow reauthentication
+          persistSupabaseUser(null);
+          supabase.auth.signOut({ scope: 'local' }).catch(() => {});
         }
       });
-    }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!isMounted) return;
+      if (event === 'SIGNED_IN' && session?.user) {
+        router.push(redirectTarget);
+      } else if (event === 'SIGNED_OUT') {
+        persistSupabaseUser(null);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription?.unsubscribe();
+    };
   }, [router, redirectTarget]);
 
   const handleSubmit = async (e: React.FormEvent) => {

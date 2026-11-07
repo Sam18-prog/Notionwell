@@ -18,19 +18,21 @@ export async function POST(req: NextRequest) {
       isVoice = false,
     } = body;
 
-    if (!sessionId || !questionText || typeof questionIndex !== 'number' || !studentResponse) {
+    if (!sessionId || !questionText || typeof questionIndex !== 'number' || typeof studentResponse !== 'string') {
       return NextResponse.json(
-        { success: false, error: 'sessionId, questionIndex, questionText, and studentResponse are required.' },
+        { success: false, error: 'sessionId, questionIndex, questionText, and studentResponse string are required.' },
         { status: 400 }
       );
     }
+
+    const trimmedResponse = studentResponse.trim() || "I don't know the answer.";
 
     const result = await evaluateVivaTurn({
       sessionId,
       userId: session.id,
       questionIndex,
       questionText,
-      studentResponse,
+      studentResponse: trimmedResponse,
       isVoice: Boolean(isVoice),
     });
 

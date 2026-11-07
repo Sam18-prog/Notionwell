@@ -6,7 +6,6 @@ import {
   Mic,
   MicOff,
   Volume2,
-  VolumeX,
   Square,
   Sparkles,
   HelpCircle,
@@ -18,25 +17,42 @@ import {
   Award,
   BookOpen,
   ArrowRight,
-  TrendingUp,
   RotateCcw,
-  Clock,
-  User as UserIcon,
   Bot,
+  FileText,
+  Layers,
+  ChevronRight,
+  Check,
+  Info,
 } from 'lucide-react';
-import { getCurrentUser, getDecks, getSubjects, Deck, Subject, User } from '@/lib/app';
-import { VivaSession, VivaResponse, VivaMode, DifficultyLevel } from '@/lib/intelligence';
+import { getCurrentUser, getDecks, Deck, User } from '@/lib/app';
+import { VivaSession, VivaMode, DifficultyLevel } from '@/lib/intelligence';
 import VivaLoading from './loading';
+
+interface StoredDoc {
+  id: string;
+  fileName: string;
+  fileType: string;
+  characterCount: number;
+  chunkCount: number;
+  createdAt: string;
+}
 
 export default function VivaPrepPage() {
   const [user, setUser] = useState<User | null>(null);
   const [mounted, setMounted] = useState(false);
 
-  // Configuration modal & setup states
+  // Available study materials
+  const [availableDocs, setAvailableDocs] = useState<StoredDoc[]>([]);
+  const [availableDecks, setAvailableDecks] = useState<Deck[]>([]);
+  const [isLoadingSources, setIsLoadingSources] = useState(false);
+
+  // Configuration modal & source selection states
   const [isConfigOpen, setIsConfigOpen] = useState(true);
-  const [subjects, setSubjects] = useState<Subject[]>([]);
-  const [decks, setDecks] = useState<Deck[]>([]);
-  const [topicTitle, setTopicTitle] = useState('Machine Learning Fundamentals');
+  const [sourceType, setSourceType] = useState<'document' | 'deck' | 'custom'>('document');
+  const [selectedDocId, setSelectedDocId] = useState<string>('');
+  const [selectedDeckId, setSelectedDeckId] = useState<string>('');
+  const [topicTitle, setTopicTitle] = useState('Operating Systems: Virtual Memory & Paging');
   const [vivaMode, setVivaMode] = useState<VivaMode>('comprehensive');
   const [difficulty, setDifficulty] = useState<DifficultyLevel>('intermediate');
   const [totalQuestions, setTotalQuestions] = useState(5);
@@ -51,17 +67,24 @@ export default function VivaPrepPage() {
     question: string;
     studentAnswer: string;
     score: number;
+    evaluationStatus?: 'correct' | 'partially_correct' | 'incorrect';
     feedback: string;
+    strengths?: string[];
+    missingPoints?: string[];
+    technicalInaccuracies?: string[];
+    idealAnswer?: string;
   }>>([]);
 
   // Student answer inputs
   const [answerInput, setAnswerInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Speech Recognition (STT)
+  // Speech Recognition (Web Speech API)
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
+  const [micPermissionDenied, setMicPermissionDenied] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const speechAccumulatedRef = useRef<string>('');
 
   // Speech Synthesis (TTS)
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -73,31 +96,112 @@ export default function VivaPrepPage() {
   const [currentEvaluation, setCurrentEvaluation] = useState<any | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Load study materials & check for active saved session
   useEffect(() => {
     setMounted(true);
-    setUser(getCurrentUser());
-    setSubjects(getSubjects());
-    setDecks(getDecks());
+    const currentUser = getCurrentUser();
+    setUser(currentUser);
+    const localDecks = getDecks();
+    setAvailableDecks(localDecks);
 
-    // Check Web Speech API support
+    // Fetch user indexed documents
+    setIsLoadingSources(true);
+    fetch('/api/assistant/index-document')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.documents) && data.documents.length > 0) {
+          setAvailableDocs(data.documents);
+          // Default selection to first uploaded document
+          setSelectedDocId(data.documents[0].id);
+          setTopicTitle(data.documents[0].fileName.replace(/\.[^/.]+$/, ''));
+          setSourceType('document');
+        } else if (localDecks.length > 0) {
+          setSelectedDeckId(localDecks[0].id);
+          setTopicTitle(localDecks[0].name);
+          setSourceType('deck');
+        } else {
+          setSourceType('custom');
+        }
+      })
+      .catch(err => {
+        console.warn('Failed to fetch documents for viva selection:', err);
+        if (localDecks.length > 0) {
+          setSelectedDeckId(localDecks[0].id);
+          setTopicTitle(localDecks[0].name);
+          setSourceType('deck');
+        }
+      })
+      .finally(() => setIsLoadingSources(false));
+
+    // Restore active session if present in localStorage
+    try {
+      const savedSessionId = localStorage.getItem('notionwell_active_viva_session_id');
+      if (savedSessionId) {
+        fetch(`/api/study/viva/session/${savedSessionId}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && data.session && data.session.status === 'in_progress') {
+              setSession(data.session);
+              setIsConfigOpen(false);
+              const responses = data.responses || [];
+              if (responses.length > 0) {
+                const history = responses.map((r: any) => ({
+                  qIndex: r.questionIndex,
+                  question: r.questionText,
+                  studentAnswer: r.studentResponse,
+                  score: r.score,
+                  evaluationStatus: r.evaluationStatus,
+                  feedback: r.feedback,
+                  strengths: r.strengths,
+                  missingPoints: r.missingPoints,
+                  technicalInaccuracies: r.technicalInaccuracies,
+                  idealAnswer: r.idealAnswer,
+                }));
+                setTranscriptHistory(history);
+                const nextQIdx = responses.length + 1;
+                setQuestionIndex(nextQIdx);
+                const lastTurn = responses[responses.length - 1];
+                if (lastTurn.followUpQuestion) {
+                  setCurrentQuestion(lastTurn.followUpQuestion);
+                } else {
+                  setCurrentQuestion(`Question ${nextQIdx}: Explain the key performance trade-offs in this topic.`);
+                }
+              }
+            }
+          })
+          .catch(() => {});
+      }
+    } catch {}
+
+    // Initialize Web Speech API for voice recording
     if (typeof window !== 'undefined') {
       const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRec) {
         setSpeechSupported(true);
         const recog = new SpeechRec();
-        recog.continuous = false;
+        recog.continuous = true;
         recog.interimResults = true;
         recog.lang = 'en-US';
 
         recog.onresult = (event: any) => {
-          const text = Array.from(event.results)
-            .map((res: any) => res[0].transcript)
-            .join('');
-          setAnswerInput(text);
+          let interimTranscript = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              speechAccumulatedRef.current += (speechAccumulatedRef.current ? ' ' : '') + transcript.trim();
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+          const fullText = speechAccumulatedRef.current + (interimTranscript ? ` ${interimTranscript}` : '');
+          setAnswerInput(fullText.trim());
         };
 
         recog.onerror = (err: any) => {
-          console.warn('[Viva STT Error]:', err);
+          console.warn('[Viva Voice STT Error]:', err);
+          if (err?.error === 'not-allowed') {
+            setMicPermissionDenied(true);
+          }
           setIsListening(false);
         };
 
@@ -133,19 +237,38 @@ export default function VivaPrepPage() {
     }
   };
 
-  const toggleMic = () => {
+  const toggleVoiceRecording = () => {
     if (!recognitionRef.current) return;
+    setMicPermissionDenied(false);
+
     if (isListening) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+      } catch {}
       setIsListening(false);
     } else {
       try {
+        speechAccumulatedRef.current = answerInput.trim();
         recognitionRef.current.start();
         setIsListening(true);
       } catch (e) {
-        console.warn('STT Start failed:', e);
+        console.warn('Voice recording start failed:', e);
       }
     }
+  };
+
+  const handleSelectDocument = (doc: StoredDoc) => {
+    setSelectedDocId(doc.id);
+    setSelectedDeckId('');
+    setSourceType('document');
+    setTopicTitle(doc.fileName.replace(/\.[^/.]+$/, ''));
+  };
+
+  const handleSelectDeck = (deck: Deck) => {
+    setSelectedDeckId(deck.id);
+    setSelectedDocId('');
+    setSourceType('deck');
+    setTopicTitle(deck.name);
   };
 
   const handleStartViva = async (e: React.FormEvent) => {
@@ -155,43 +278,71 @@ export default function VivaPrepPage() {
     try {
       setIsStarting(true);
       stopSpeaking();
+      setSubmitError(null);
+
+      let sourceTitle = topicTitle.trim();
+      let documentId: string | undefined = undefined;
+      let deckId: string | undefined = undefined;
+
+      if (sourceType === 'document' && selectedDocId) {
+        documentId = selectedDocId;
+        const matchedDoc = availableDocs.find(d => d.id === selectedDocId);
+        if (matchedDoc) sourceTitle = matchedDoc.fileName;
+      } else if (sourceType === 'deck' && selectedDeckId) {
+        deckId = selectedDeckId;
+        const matchedDeck = availableDecks.find(d => d.id === selectedDeckId);
+        if (matchedDeck) sourceTitle = matchedDeck.name;
+      }
 
       const res = await fetch('/api/study/viva/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          topicTitle,
+          topicTitle: topicTitle.trim(),
           vivaMode,
           difficulty,
           totalQuestions,
+          sourceType,
+          sourceTitle,
+          documentId,
+          deckId,
         }),
       });
 
       const data = await res.json();
-      if (data.success && data.session) {
-        setSession(data.session);
-        setCurrentQuestion(data.firstQuestion);
-        setQuestionIndex(1);
-        setTranscriptHistory([]);
-        setFinalReport(null);
-        setCurrentEvaluation(null);
-        setSubmitError(null);
-        setIsConfigOpen(false);
-        setAnswerInput('');
-
-        // Speak the first question aloud
-        speakText(`Question 1. ${data.firstQuestion}`);
+      if (!res.ok || !data.success || !data.session) {
+        throw new Error(data.error || 'Failed to start viva session. Please try again.');
       }
-    } catch (err) {
+
+      setSession(data.session);
+      setCurrentQuestion(data.firstQuestion);
+      setQuestionIndex(1);
+      setTranscriptHistory([]);
+      setFinalReport(null);
+      setCurrentEvaluation(null);
+      setSubmitError(null);
+      setIsConfigOpen(false);
+      setAnswerInput('');
+
+      // Persist active session ID in localStorage
+      try {
+        localStorage.setItem('notionwell_active_viva_session_id', data.session.id);
+      } catch {}
+
+      // Examiner speaks the first oral question
+      speakText(`Question 1. ${data.firstQuestion}`);
+    } catch (err: any) {
       console.error('Failed to start viva session:', err);
+      setSubmitError(err.message || 'Could not initiate examination session.');
     } finally {
       setIsStarting(false);
     }
   };
 
-  const handleSubmitAnswer = async (e?: React.FormEvent) => {
+  const handleSubmitAnswer = async (e?: React.FormEvent, customAnswer?: string) => {
     if (e) e.preventDefault();
-    if (!answerInput.trim() || isSubmitting || !session) return;
+    const finalAnswer = (customAnswer !== undefined ? customAnswer : answerInput).trim();
+    if (!finalAnswer || isSubmitting || !session) return;
 
     setSubmitError(null);
     try {
@@ -212,7 +363,7 @@ export default function VivaPrepPage() {
           sessionId: session.id,
           questionIndex,
           questionText: currentQuestion,
-          studentResponse: answerInput.trim(),
+          studentResponse: finalAnswer,
           isVoice: wasVoice,
         }),
       });
@@ -230,9 +381,14 @@ export default function VivaPrepPage() {
         {
           qIndex: questionIndex,
           question: currentQuestion,
-          studentAnswer: answerInput.trim(),
+          studentAnswer: finalAnswer,
           score: ev.score,
+          evaluationStatus: ev.evaluationStatus,
           feedback: ev.feedback,
+          strengths: ev.strengths,
+          missingPoints: ev.missingPoints,
+          technicalInaccuracies: ev.technicalInaccuracies,
+          idealAnswer: ev.idealAnswer,
         },
       ]);
 
@@ -246,21 +402,42 @@ export default function VivaPrepPage() {
     }
   };
 
+  const handlePassQuestion = () => {
+    handleSubmitAnswer(undefined, "I do not know the answer to this question.");
+  };
+
   const handleProceedToNextQuestion = () => {
     if (!currentEvaluation || !session) return;
 
     if (currentEvaluation.isComplete) {
       setFinalReport(currentEvaluation.finalSummary);
-      speakText(`Viva complete. Your overall evaluation is ${currentEvaluation.finalSummary?.overallScore || 80} percent. Well done.`);
+      try {
+        localStorage.removeItem('notionwell_active_viva_session_id');
+      } catch {}
+      speakText(`Viva voce complete. Your overall examination rating is ${currentEvaluation.finalSummary?.overallScore || 80} percent. Well defended.`);
     } else {
       setQuestionIndex(prev => prev + 1);
-      const nextQ = currentEvaluation.followUpQuestion || `Could you elaborate further on how this applies to real-world edge cases?`;
+      const nextQ = currentEvaluation.followUpQuestion || `Could you elaborate further on how this applies to practical scenarios?`;
       setCurrentQuestion(nextQ);
       speakText(`Question ${questionIndex + 1}. ${nextQ}`);
     }
     setCurrentEvaluation(null);
     setAnswerInput('');
+    speechAccumulatedRef.current = '';
     setSubmitError(null);
+  };
+
+  const handleStartNewSession = () => {
+    stopSpeaking();
+    try {
+      localStorage.removeItem('notionwell_active_viva_session_id');
+    } catch {}
+    setSession(null);
+    setFinalReport(null);
+    setCurrentEvaluation(null);
+    setTranscriptHistory([]);
+    setAnswerInput('');
+    setIsConfigOpen(true);
   };
 
   if (!mounted) return <VivaLoading />;
@@ -269,26 +446,28 @@ export default function VivaPrepPage() {
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0A0F1D] text-[#0F172A] dark:text-[#F8FAFC]">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-6">
 
-        {/* HEADER */}
+        {/* TOP BREADCRUMB & HEADER */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2.5 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-900/60 text-indigo-600">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900/60 text-[#2563EB]">
               <Mic className="w-6 h-6" />
             </div>
             <div>
+              <div className="flex items-center gap-2 text-xs font-bold text-[#64748B] dark:text-[#94A3B8]">
+                <Link href="/dashboard" className="hover:text-[#2563EB]">Dashboard</Link>
+                <ChevronRight className="w-3.5 h-3.5" />
+                <span className="text-[#2563EB] dark:text-[#60A5FA]">AI Viva Voce Defense</span>
+              </div>
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">AI Viva Voce Simulator</h1>
               <p className="text-xs sm:text-sm text-[#64748B] dark:text-[#94A3B8]">
-                Real-time interactive oral examination testing accuracy, conceptual depth, and verbal articulation
+                Interactive oral examination grounded in your course notes, testing conceptual depth and verbal defense
               </p>
             </div>
           </div>
 
           <button
-            onClick={() => {
-              stopSpeaking();
-              setIsConfigOpen(true);
-            }}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-xs font-bold hover:border-[#2563EB] transition-colors"
+            onClick={handleStartNewSession}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border border-[#CBD5E1] dark:border-[#334155] bg-white dark:bg-[#0F172A] text-xs font-bold hover:border-[#2563EB] transition-colors cursor-pointer shadow-xs"
           >
             <RotateCcw className="w-3.5 h-3.5 text-[#2563EB]" />
             <span>New Viva Session</span>
@@ -297,45 +476,50 @@ export default function VivaPrepPage() {
 
         {/* ACTIVE SESSION VIEW */}
         {session && !finalReport ? (
-          <div className="rounded-3xl bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#263449] p-6 shadow-xs space-y-6">
+          <div className="rounded-3xl bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#263449] p-6 sm:p-7 shadow-xs space-y-6">
             
-            {/* Top Session Progress Bar */}
-            <div className="flex items-center justify-between pb-4 border-b border-[#E2E8F0] dark:border-[#263449]">
-              <div className="flex items-center gap-2 text-xs">
-                <span className="px-2.5 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-400 font-extrabold uppercase">
+            {/* Top Session Progress Bar & Grounding Reference */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-[#E2E8F0] dark:border-[#263449]">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="px-2.5 py-1 rounded-md bg-blue-100 dark:bg-blue-950/80 text-[#2563EB] dark:text-[#60A5FA] font-extrabold uppercase text-[10px]">
                   {session.vivaMode} Mode
                 </span>
-                <span className="text-[#64748B] dark:text-[#94A3B8]">• {session.difficulty} difficulty</span>
-                <span className="text-[#64748B] dark:text-[#94A3B8]">• "{session.topicTitle}"</span>
+                <span className="text-[#64748B] dark:text-[#94A3B8]">• {session.difficulty} level</span>
+                {session.sourceTitle && (
+                  <span className="flex items-center gap-1 font-bold text-[#0F172A] dark:text-[#E2E8F0]">
+                    • <BookOpen className="w-3 h-3 text-[#2563EB]" />
+                    <span>Source: {session.sourceTitle}</span>
+                  </span>
+                )}
               </div>
 
-              <div className="text-xs font-extrabold text-[#2563EB]">
+              <div className="text-xs font-black text-[#2563EB] dark:text-[#60A5FA]">
                 Question {questionIndex} of {session.totalQuestions}
               </div>
             </div>
 
             {/* EXAMINER QUESTION BOX */}
-            <div className="p-6 rounded-2xl bg-gradient-to-br from-blue-50/70 to-indigo-50/50 dark:from-[#131D31] dark:to-[#172033] border border-blue-200 dark:border-blue-900/40 space-y-3">
+            <div className="p-6 rounded-2xl bg-gradient-to-br from-blue-50/80 to-indigo-50/60 dark:from-[#131D31] dark:to-[#172033] border border-blue-200 dark:border-blue-900/40 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-extrabold text-[#2563EB]">
                   <Bot className="w-4 h-4" />
-                  <span>Academic Viva Examiner:</span>
+                  <span>Viva Examiner:</span>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => isSpeaking ? stopSpeaking() : speakText(currentQuestion)}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white dark:bg-[#0F172A] border border-blue-200 dark:border-blue-800 text-[11px] font-bold text-[#2563EB] hover:bg-blue-50"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white dark:bg-[#0F172A] border border-blue-200 dark:border-blue-800 text-[11px] font-bold text-[#2563EB] hover:bg-blue-50 transition-colors cursor-pointer"
                   >
                     {isSpeaking ? (
                       <>
                         <Square className="w-3 h-3 fill-current animate-pulse text-amber-500" />
-                        <span>Stop Audio</span>
+                        <span>Stop Voice Audio</span>
                       </>
                     ) : (
                       <>
                         <Volume2 className="w-3 h-3" />
-                        <span>Repeat Question</span>
+                        <span>Repeat Question Aloud</span>
                       </>
                     )}
                   </button>
@@ -347,13 +531,13 @@ export default function VivaPrepPage() {
               </p>
             </div>
 
-            {/* PREVIOUS EXCHANGES */}
+            {/* PREVIOUS EXCHANGES TRANSCRIPT */}
             {transcriptHistory.length > 0 && (
               <div className="space-y-3 pt-2">
                 <h3 className="text-xs font-extrabold text-[#64748B] dark:text-[#94A3B8] uppercase tracking-wider">
-                  Previous Q&A Turns ({transcriptHistory.length})
+                  Previous Q&A Defense Turns ({transcriptHistory.length})
                 </h3>
-                <div className="space-y-2.5">
+                <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
                   {transcriptHistory.map((turn, tIdx) => (
                     <div
                       key={tIdx}
@@ -361,11 +545,17 @@ export default function VivaPrepPage() {
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-extrabold text-[#2563EB]">Turn {turn.qIndex}</span>
-                        <span className="font-black text-emerald-600 dark:text-emerald-400">Score: {turn.score} / 10</span>
+                        <span className={`font-black ${
+                          turn.score >= 7.5 ? 'text-emerald-600 dark:text-emerald-400' :
+                          turn.score >= 4.0 ? 'text-amber-600 dark:text-amber-400' :
+                          'text-rose-600 dark:text-rose-400'
+                        }`}>
+                          Score: {turn.score.toFixed(1)} / 10
+                        </span>
                       </div>
                       <p className="text-[#0F172A] dark:text-white font-medium"><strong>Q:</strong> {turn.question}</p>
                       <p className="text-[#334155] dark:text-[#CBD5E1] italic"><strong>Your Answer:</strong> "{turn.studentAnswer}"</p>
-                      <div className="p-2.5 rounded-xl bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#263449] text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#263449] text-[11px] text-[#64748B] dark:text-[#CBD5E1]">
                         <strong>Examiner Feedback:</strong> {turn.feedback}
                       </div>
                     </div>
@@ -374,7 +564,7 @@ export default function VivaPrepPage() {
               </div>
             )}
 
-            {/* ERROR NOTIFICATION */}
+            {/* SUBMIT ERROR NOTIFICATION */}
             {submitError && (
               <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -383,24 +573,33 @@ export default function VivaPrepPage() {
                 </div>
                 <button
                   onClick={() => setSubmitError(null)}
-                  className="text-xs underline text-rose-600 hover:text-rose-800 dark:text-rose-400"
+                  className="text-xs underline text-rose-600 hover:text-rose-800 dark:text-rose-400 cursor-pointer"
                 >
                   Dismiss
                 </button>
               </div>
             )}
 
+            {/* MIC PERMISSION WARNING */}
+            {micPermissionDenied && (
+              <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-900/60 text-amber-800 dark:text-amber-300 text-xs font-medium flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-500" />
+                <span>Microphone access was denied. Please allow microphone permissions in your browser or type your answer using the keyboard below.</span>
+              </div>
+            )}
+
             {/* STRUCTURED EVALUATION REVIEW CARD */}
             {currentEvaluation ? (
-              <div className="p-6 rounded-2xl bg-white dark:bg-[#131D31] border-2 border-indigo-200 dark:border-indigo-900/60 space-y-4 shadow-sm animate-in fade-in duration-200">
-                <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] dark:border-[#263449]">
-                  <div className="flex items-center gap-2">
-                    {currentEvaluation.score >= 8 ? (
+              <div className="p-6 rounded-2xl bg-white dark:bg-[#131D31] border-2 border-indigo-200 dark:border-indigo-900/60 space-y-5 shadow-sm animate-in fade-in duration-200">
+                {/* Header: Status Badge and Score */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#E2E8F0] dark:border-[#263449]">
+                  <div className="flex items-center gap-2.5">
+                    {currentEvaluation.score >= 7.5 ? (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                         <CheckCircle2 className="w-3.5 h-3.5" />
-                        Mastered Answer
+                        Correct &amp; Well Articulated
                       </span>
-                    ) : currentEvaluation.score >= 5 ? (
+                    ) : currentEvaluation.score >= 4.0 ? (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                         <AlertCircle className="w-3.5 h-3.5" />
                         Partially Correct
@@ -408,40 +607,134 @@ export default function VivaPrepPage() {
                     ) : (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
                         <XCircle className="w-3.5 h-3.5" />
-                        Needs Review
+                        Incorrect / Incomplete
                       </span>
                     )}
                     <span className="text-xs font-extrabold text-[#64748B] dark:text-[#94A3B8]">
-                      Turn {questionIndex} Evaluation
+                      Question {questionIndex} Evaluation
                     </span>
                   </div>
 
-                  <div className="text-sm font-black text-[#2563EB] dark:text-[#60A5FA]">
+                  <div className="text-base font-black text-[#2563EB] dark:text-[#60A5FA]">
                     Score: {currentEvaluation.score.toFixed(1)} / 10
                   </div>
                 </div>
 
-                <div className="space-y-1.5 text-xs">
-                  <p className="font-extrabold text-[#0F172A] dark:text-white uppercase tracking-wider text-[10px]">
-                    Examiner Feedback:
-                  </p>
+                {/* Examiner Verbal Critique Box */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold text-[#0F172A] dark:text-white uppercase tracking-wider text-[10px]">
+                      Examiner Verbal Critique:
+                    </span>
+                    <button
+                      onClick={() => speakText(currentEvaluation.feedback)}
+                      className="flex items-center gap-1 text-[11px] font-bold text-[#2563EB] hover:underline cursor-pointer"
+                    >
+                      <Volume2 className="w-3 h-3" />
+                      <span>Listen to Feedback</span>
+                    </button>
+                  </div>
                   <p className="text-xs sm:text-sm text-[#334155] dark:text-[#CBD5E1] leading-relaxed font-medium bg-[#F8FAFC] dark:bg-[#0F172A] p-4 rounded-xl border border-[#E2E8F0] dark:border-[#263449]">
                     {currentEvaluation.feedback}
                   </p>
                 </div>
 
-                <div className="flex items-center justify-between pt-2">
-                  <button
-                    onClick={() => speakText(currentEvaluation.feedback)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#CBD5E1] dark:border-[#334155] text-xs font-bold text-[#64748B] dark:text-[#CBD5E1] hover:text-[#2563EB]"
-                  >
-                    <Volume2 className="w-3.5 h-3.5" />
-                    <span>Listen to Feedback</span>
-                  </button>
+                {/* Rubric Breakdown Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                  {/* Strengths */}
+                  <div className="p-3.5 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/40 space-y-1.5">
+                    <div className="font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                      <Check className="w-3.5 h-3.5" />
+                      <span>What Was Answered Correctly</span>
+                    </div>
+                    {currentEvaluation.strengths && currentEvaluation.strengths.length > 0 ? (
+                      <ul className="space-y-1 text-[#334155] dark:text-[#CBD5E1]">
+                        {currentEvaluation.strengths.map((s: string, idx: number) => (
+                          <li key={idx} className="flex items-start gap-1">
+                            <span className="text-emerald-500 font-bold">•</span>
+                            <span>{s}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-[#64748B] italic">No solid academic points established.</p>
+                    )}
+                  </div>
 
+                  {/* Missing Points */}
+                  <div className="p-3.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 space-y-1.5">
+                    <div className="font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                      <Info className="w-3.5 h-3.5" />
+                      <span>Missing Concepts &amp; Nuances</span>
+                    </div>
+                    {currentEvaluation.missingPoints && currentEvaluation.missingPoints.length > 0 ? (
+                      <ul className="space-y-1 text-[#334155] dark:text-[#CBD5E1]">
+                        {currentEvaluation.missingPoints.map((m: string, idx: number) => (
+                          <li key={idx} className="flex items-start gap-1">
+                            <span className="text-amber-500 font-bold">•</span>
+                            <span>{m}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-emerald-600 font-medium">All essential concepts covered.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Technical Inaccuracies (if any) */}
+                {currentEvaluation.technicalInaccuracies && currentEvaluation.technicalInaccuracies.length > 0 && (
+                  <div className="p-3.5 rounded-xl bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 text-xs space-y-1">
+                    <div className="font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                      <XCircle className="w-3.5 h-3.5" />
+                      <span>Technical Inaccuracies Identified</span>
+                    </div>
+                    <ul className="space-y-1 text-[#334155] dark:text-[#CBD5E1]">
+                      {currentEvaluation.technicalInaccuracies.map((item: string, idx: number) => (
+                        <li key={idx} className="flex items-start gap-1">
+                          <span className="text-rose-500 font-bold">•</span>
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Ideal Academic Model Answer */}
+                {currentEvaluation.idealAnswer && (
+                  <div className="p-4 rounded-xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/40 text-xs space-y-1.5">
+                    <div className="font-bold text-[#2563EB] dark:text-[#60A5FA] flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Ideal Academic Model Answer</span>
+                    </div>
+                    <p className="text-[#334155] dark:text-[#CBD5E1] leading-relaxed">
+                      {currentEvaluation.idealAnswer}
+                    </p>
+                  </div>
+                )}
+
+                {/* Suggestions for Oral Defense */}
+                {currentEvaluation.suggestions && currentEvaluation.suggestions.length > 0 && (
+                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 text-xs space-y-1">
+                    <span className="font-bold text-[#475569] dark:text-[#94A3B8]">
+                      Oral Defense Tip:
+                    </span>
+                    <ul className="space-y-1 text-[#334155] dark:text-[#CBD5E1]">
+                      {currentEvaluation.suggestions.map((tip: string, idx: number) => (
+                        <li key={idx} className="flex items-start gap-1">
+                          <span className="text-blue-500 font-bold">→</span>
+                          <span>{tip}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Next Question Progression Button */}
+                <div className="pt-2 flex justify-end">
                   <button
                     onClick={handleProceedToNextQuestion}
-                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-extrabold text-xs shadow-md transition-all hover:scale-[1.02] cursor-pointer"
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-extrabold text-xs shadow-md transition-all hover:scale-[1.01] cursor-pointer"
                   >
                     <span>
                       {currentEvaluation.isComplete
@@ -453,13 +746,13 @@ export default function VivaPrepPage() {
                 </div>
               </div>
             ) : (
-              /* STUDENT ANSWER AREA */
+              /* STUDENT ANSWER INPUT FORM */
               <form onSubmit={handleSubmitAnswer} className="space-y-3 pt-2">
                 <div className="flex items-center justify-between text-xs font-bold text-[#64748B] dark:text-[#94A3B8]">
                   <span>Your Verbal or Written Response:</span>
                   {speechSupported && (
                     <span className="text-[11px] font-normal text-slate-500">
-                      {isListening ? '🎙️ Mic active • Speaking...' : 'Click microphone to answer aloud'}
+                      {isListening ? '🎙️ Voice Recording Active • Speaking...' : 'Speak aloud or type your answer'}
                     </span>
                   )}
                 </div>
@@ -467,7 +760,7 @@ export default function VivaPrepPage() {
                 {isListening && (
                   <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center gap-2 animate-pulse">
                     <Mic className="w-4 h-4 text-rose-500" />
-                    <span>Listening to your spoken answer... speak clearly into your microphone.</span>
+                    <span>Listening to your voice answer... Speak clearly into your microphone. Click Finish Speaking when done.</span>
                   </div>
                 )}
 
@@ -475,29 +768,39 @@ export default function VivaPrepPage() {
                   <textarea
                     value={answerInput}
                     onChange={e => setAnswerInput(e.target.value)}
-                    placeholder="Articulate your answer clearly here, or click the mic button to speak your response aloud..."
+                    placeholder="Articulate your answer clearly here, or click 'Answer via Voice' to speak your response aloud..."
                     rows={4}
                     className="w-full px-4 py-3 rounded-2xl border border-[#CBD5E1] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#1E293B] text-xs sm:text-sm text-[#0F172A] dark:text-white placeholder-[#94A3B8] outline-hidden focus:border-[#2563EB] resize-none shadow-inner"
                   />
                 </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  {speechSupported ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="flex items-center gap-2">
+                    {speechSupported && (
+                      <button
+                        type="button"
+                        onClick={toggleVoiceRecording}
+                        className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                          isListening
+                            ? 'bg-rose-600 text-white animate-pulse shadow-md shadow-rose-500/20'
+                            : 'bg-slate-100 dark:bg-slate-800 text-[#64748B] dark:text-[#94A3B8] hover:text-[#2563EB]'
+                        }`}
+                      >
+                        {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                        <span>{isListening ? 'Finish Speaking' : 'Answer via Voice'}</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
-                      onClick={toggleMic}
-                      className={`flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
-                        isListening
-                          ? 'bg-rose-600 text-white animate-pulse shadow-md shadow-rose-500/20'
-                          : 'bg-slate-100 dark:bg-slate-800 text-[#64748B] dark:text-[#94A3B8] hover:text-[#2563EB]'
-                      }`}
+                      onClick={handlePassQuestion}
+                      disabled={isSubmitting}
+                      className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xs font-bold cursor-pointer"
+                      title="Admit uncertainty and receive examiner model answer"
                     >
-                      {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                      <span>{isListening ? 'Finish Speaking' : 'Answer via Voice'}</span>
+                      I don't know / Pass
                     </button>
-                  ) : (
-                    <div className="text-[11px] text-[#94A3B8]">Voice input ready via keyboard</div>
-                  )}
+                  </div>
 
                   <button
                     type="submit"
@@ -531,11 +834,11 @@ export default function VivaPrepPage() {
               </div>
               <h2 className="text-2xl font-black">Viva Voce Diagnostic Examination Report</h2>
               <p className="text-xs text-[#64748B] dark:text-[#94A3B8]">
-                Topic: "{session?.topicTitle}" • Evaluated across {session?.totalQuestions} oral questions
+                Topic: "{session?.topicTitle}" • Evaluated across {session?.totalQuestions} oral defense turns
               </p>
             </div>
 
-            {/* PERFORMANCE RADAR / METRIC CARDS */}
+            {/* PERFORMANCE METRIC CARDS */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="p-4 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 text-center">
                 <span className="text-[11px] font-bold text-[#2563EB] uppercase">Overall Rating</span>
@@ -610,12 +913,12 @@ export default function VivaPrepPage() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-extrabold text-[#2563EB]">Question {t.qIndex}</span>
-                      <span className="font-bold text-emerald-600">Graded {t.score} / 10</span>
+                      <span className="font-bold text-emerald-600">Graded {t.score.toFixed(1)} / 10</span>
                     </div>
                     <p className="font-bold text-[#0F172A] dark:text-white">"{t.question}"</p>
                     <p className="text-[#475569] dark:text-[#94A3B8] italic">Student Answer: "{t.studentAnswer}"</p>
                     <div className="p-2.5 rounded-xl bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#263449] text-[11px] text-[#64748B] dark:text-[#CBD5E1]">
-                      <strong>Critique:</strong> {t.feedback}
+                      <strong>Examiner Feedback:</strong> {t.feedback}
                     </div>
                   </div>
                 ))}
@@ -624,15 +927,17 @@ export default function VivaPrepPage() {
 
             <div className="pt-2 flex justify-center gap-3">
               <button
-                onClick={() => {
-                  setSession(null);
-                  setFinalReport(null);
-                  setIsConfigOpen(true);
-                }}
+                onClick={handleStartNewSession}
                 className="px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-extrabold text-xs shadow-md transition-all cursor-pointer"
               >
                 Practice Another Viva
               </button>
+              <Link
+                href="/dashboard"
+                className="px-5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-50 transition-colors"
+              >
+                Return to Dashboard
+              </Link>
             </div>
 
           </div>
@@ -649,25 +954,148 @@ export default function VivaPrepPage() {
 
       </div>
 
-      {/* CONFIGURATION MODAL */}
+      {/* CONFIGURATION & SOURCE SELECTION MODAL */}
       {isConfigOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#263449] p-6 space-y-5 shadow-2xl">
+          <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white dark:bg-[#0F172A] border border-[#E2E8F0] dark:border-[#263449] p-6 space-y-5 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] dark:border-[#263449]">
               <div className="flex items-center gap-2">
                 <Mic className="w-5 h-5 text-[#2563EB]" />
                 <h3 className="font-extrabold text-base">Configure AI Viva Voce Simulation</h3>
               </div>
               {session && (
-                <button onClick={() => setIsConfigOpen(false)} className="text-xs text-[#94A3B8]">
+                <button
+                  type="button"
+                  onClick={() => setIsConfigOpen(false)}
+                  className="text-xs text-[#94A3B8] hover:text-white cursor-pointer"
+                >
                   Close
                 </button>
               )}
             </div>
 
             <form onSubmit={handleStartViva} className="space-y-4 text-xs">
+              
+              {/* STEP 1: CHOOSE STUDY SOURCE */}
+              <div className="space-y-2">
+                <label className="block font-bold">Step 1: Select Examination Material (Grounding)</label>
+                
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSourceType('document')}
+                    className={`flex items-center justify-center gap-1.5 p-2.5 rounded-xl border font-bold text-center transition-all cursor-pointer ${
+                      sourceType === 'document'
+                        ? 'bg-[#2563EB] text-white border-[#2563EB]'
+                        : 'bg-[#F8FAFC] dark:bg-[#1E293B] border-[#CBD5E1] dark:border-[#334155] text-[#64748B] dark:text-[#CBD5E1]'
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Uploaded Docs</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSourceType('deck')}
+                    className={`flex items-center justify-center gap-1.5 p-2.5 rounded-xl border font-bold text-center transition-all cursor-pointer ${
+                      sourceType === 'deck'
+                        ? 'bg-[#2563EB] text-white border-[#2563EB]'
+                        : 'bg-[#F8FAFC] dark:bg-[#1E293B] border-[#CBD5E1] dark:border-[#334155] text-[#64748B] dark:text-[#CBD5E1]'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>Study Decks</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSourceType('custom')}
+                    className={`flex items-center justify-center gap-1.5 p-2.5 rounded-xl border font-bold text-center transition-all cursor-pointer ${
+                      sourceType === 'custom'
+                        ? 'bg-[#2563EB] text-white border-[#2563EB]'
+                        : 'bg-[#F8FAFC] dark:bg-[#1E293B] border-[#CBD5E1] dark:border-[#334155] text-[#64748B] dark:text-[#CBD5E1]'
+                    }`}
+                  >
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>Custom Topic</span>
+                  </button>
+                </div>
+
+                {/* Sub-selection list based on source tab */}
+                {sourceType === 'document' && (
+                  <div className="space-y-1.5 mt-2">
+                    <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+                      Choose an uploaded document to ground examiner questions:
+                    </span>
+                    {availableDocs.length > 0 ? (
+                      <div className="max-h-36 overflow-y-auto space-y-1.5 border border-slate-200 dark:border-slate-800 rounded-xl p-2 bg-slate-50/50 dark:bg-slate-900/40">
+                        {availableDocs.map(doc => (
+                          <div
+                            key={doc.id}
+                            onClick={() => handleSelectDocument(doc)}
+                            className={`p-2.5 rounded-lg flex items-center justify-between cursor-pointer border transition-colors ${
+                              selectedDocId === doc.id
+                                ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-400 text-[#2563EB]'
+                                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-blue-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 overflow-hidden">
+                              <FileText className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+                              <span className="font-semibold truncate">{doc.fileName}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 shrink-0 uppercase font-mono">
+                              {doc.fileType}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-center text-slate-500">
+                        No uploaded documents found. <Link href="/assistant" className="text-[#2563EB] underline">Upload a PDF</Link> or choose a Study Deck above.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {sourceType === 'deck' && (
+                  <div className="space-y-1.5 mt-2">
+                    <span className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">
+                      Choose a study deck to test your knowledge against:
+                    </span>
+                    {availableDecks.length > 0 ? (
+                      <div className="max-h-36 overflow-y-auto space-y-1.5 border border-slate-200 dark:border-slate-800 rounded-xl p-2 bg-slate-50/50 dark:bg-slate-900/40">
+                        {availableDecks.map(deck => (
+                          <div
+                            key={deck.id}
+                            onClick={() => handleSelectDeck(deck)}
+                            className={`p-2.5 rounded-lg flex items-center justify-between cursor-pointer border transition-colors ${
+                              selectedDeckId === deck.id
+                                ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-400 text-[#2563EB]'
+                                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-blue-300'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 overflow-hidden">
+                              <Layers className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
+                              <span className="font-semibold truncate">{deck.name}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 shrink-0">
+                              {deck.flashcards?.length || 0} cards
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-center text-slate-500">
+                        No decks found. Select Custom Topic below.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* TOPIC TITLE INPUT */}
               <div>
-                <label className="block font-bold mb-1">Examination Topic</label>
+                <label className="block font-bold mb-1">Examination Topic / Chapter</label>
                 <input
                   type="text"
                   required
@@ -678,6 +1106,7 @@ export default function VivaPrepPage() {
                 />
               </div>
 
+              {/* VIVA MODE */}
               <div>
                 <label className="block font-bold mb-1">Viva Mode</label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -692,7 +1121,7 @@ export default function VivaPrepPage() {
                       key={m.id}
                       type="button"
                       onClick={() => setVivaMode(m.id as VivaMode)}
-                      className={`p-2 rounded-xl border font-bold text-center transition-all ${
+                      className={`p-2 rounded-xl border font-bold text-center transition-all cursor-pointer ${
                         vivaMode === m.id
                           ? 'bg-[#2563EB] text-white border-[#2563EB]'
                           : 'bg-[#F8FAFC] dark:bg-[#1E293B] border-[#CBD5E1] dark:border-[#334155] text-[#64748B] dark:text-[#CBD5E1]'
@@ -704,6 +1133,7 @@ export default function VivaPrepPage() {
                 </div>
               </div>
 
+              {/* DIFFICULTY & QUESTION COUNT */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold mb-1">Difficulty</label>
@@ -712,9 +1142,9 @@ export default function VivaPrepPage() {
                     onChange={e => setDifficulty(e.target.value as DifficultyLevel)}
                     className="w-full px-3 py-2 rounded-xl border border-[#CBD5E1] dark:border-[#334155] bg-[#F8FAFC] dark:bg-[#1E293B]"
                   >
-                    <option value="beginner">Beginner</option>
-                    <option value="intermediate">Intermediate</option>
-                    <option value="advanced">Advanced</option>
+                    <option value="beginner">Beginner (Undergraduate 1st Year)</option>
+                    <option value="intermediate">Intermediate (Standard College)</option>
+                    <option value="advanced">Advanced (Rigorous Defense)</option>
                   </select>
                 </div>
 
@@ -727,17 +1157,19 @@ export default function VivaPrepPage() {
                   >
                     <option value={3}>3 Questions (Quick Drill)</option>
                     <option value={5}>5 Questions (Standard Viva)</option>
-                    <option value={7}>7 Questions (Rigorous Defense)</option>
+                    <option value={7}>7 Questions (Comprehensive Viva)</option>
+                    <option value={10}>10 Questions (Mastery Defense)</option>
                   </select>
                 </div>
               </div>
 
+              {/* SUBMIT MODAL ACTIONS */}
               <div className="pt-3 flex justify-end gap-2">
                 {session && (
                   <button
                     type="button"
                     onClick={() => setIsConfigOpen(false)}
-                    className="px-4 py-2 rounded-xl border font-bold"
+                    className="px-4 py-2 rounded-xl border font-bold cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
                     Cancel
                   </button>
@@ -750,7 +1182,7 @@ export default function VivaPrepPage() {
                   {isStarting ? (
                     <>
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Examiner Preparing Questions...</span>
+                      <span>Examiner Reviewing Material...</span>
                     </>
                   ) : (
                     <span>Begin Viva Voce</span>

@@ -29,6 +29,7 @@ import {
   DEMO_SUBJECT,
   isDemoSession,
 } from './demoData';
+import { signOutUserFromSupabase } from './supabase/auth';
 
 // ============================================================================
 // DATA MODELS
@@ -1653,13 +1654,13 @@ export function getSession(): Session {
   try {
     const raw = localStorage.getItem(SESSION_KEY) || localStorage.getItem('studypack_session_v1');
     if (!raw) {
-      const storedAcc = getStoredAccount();
-      if (storedAcc) {
-        return { isLoggedIn: true, loggedInEmail: storedAcc.email };
-      }
       return { isLoggedIn: false, loggedInEmail: null };
     }
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return {
+      isLoggedIn: Boolean(parsed?.isLoggedIn),
+      loggedInEmail: parsed?.loggedInEmail || null,
+    };
   } catch (err) {
     return { isLoggedIn: false, loggedInEmail: null };
   }
@@ -1862,24 +1863,11 @@ export async function demoLoginUser(): Promise<{ success: boolean; user?: User; 
   }
 }
 
-export function logoutUser(): void {
+export async function logoutUser(): Promise<void> {
   if (!isBrowser()) return;
   try {
     saveSession({ isLoggedIn: false, loggedInEmail: null });
-    localStorage.removeItem('notionwell_user_v1');
-    // Clear demo session cookie
-    document.cookie = 'notionwell_demo_session=; path=/; max-age=0; SameSite=Lax';
-    
-    // Sign out from Supabase if configured
-    if (typeof window !== 'undefined') {
-      import('@/lib/supabase/client').then(({ isSupabaseConfigured, createClient }) => {
-        if (isSupabaseConfigured()) {
-          const supabase = createClient();
-          supabase.auth.signOut().catch((e) => console.warn('Supabase signOut error:', e));
-        }
-      }).catch(() => {});
-    }
-    
+    await signOutUserFromSupabase();
     notifyAuthChange();
   } catch (err) {
     console.error('Logout error:', err);

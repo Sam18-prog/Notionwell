@@ -86,10 +86,10 @@ export default function Sidebar() {
     setStoredTheme(nextTheme);
   };
 
-  const handleLogout = () => {
-    logoutUser();
+  const handleLogout = async () => {
     setUser(null);
-    router.push('/auth');
+    await logoutUser();
+    window.location.href = '/auth';
   };
 
   const navItems = [

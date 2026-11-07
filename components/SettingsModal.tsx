@@ -108,9 +108,9 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setStoredTheme(newTheme);
   };
 
-  const handleLogout = () => {
-    logoutUser();
+  const handleLogout = async () => {
     onClose();
+    await logoutUser();
     window.location.href = '/auth';
   };
 
