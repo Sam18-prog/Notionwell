@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import type { NextResponse } from 'next/server';
 
 export function normalizeSupabaseUrl(url?: string): string {
   if (!url) return '';
@@ -24,7 +25,10 @@ export function isSupabaseConfiguredServer(): boolean {
   );
 }
 
-export function createClient(cookieStore?: ReturnType<typeof cookies>) {
+export function createClient(
+  cookieStore?: ReturnType<typeof cookies>,
+  response?: NextResponse
+) {
   const resolvedCookieStore = cookieStore || cookies();
   const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
   const url = normalizeSupabaseUrl(rawUrl);
@@ -36,14 +40,20 @@ export function createClient(cookieStore?: ReturnType<typeof cookies>) {
         return resolvedCookieStore.getAll();
       },
       setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) => {
+        cookiesToSet.forEach(({ name, value, options }) => {
+          try {
             resolvedCookieStore.set(name, value, options);
-          });
-        } catch {
-          // setAll was called from a Server Component.
-          // Ignored if middleware is refreshing sessions.
-        }
+          } catch {
+            // setAll was called from a Server Component or read-only store.
+          }
+          if (response) {
+            try {
+              response.cookies.set(name, value, options);
+            } catch {
+              // Ignore if response is immutable
+            }
+          }
+        });
       },
     },
   });

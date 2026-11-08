@@ -1,5 +1,6 @@
 import { createClient, isSupabaseConfigured } from './client';
 import { User } from '@/lib/app';
+import { isPasswordValid } from '@/lib/passwordValidation';
 
 const SUPABASE_USER_KEY = 'notionwell_user_v1';
 
@@ -57,6 +58,14 @@ export async function signUpUserWithSupabase(
     };
   }
 
+  if (!isPasswordValid(password)) {
+    return {
+      success: false,
+      error:
+        'Password does not meet security requirements. It must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character.',
+    };
+  }
+
   const supabase = createClient();
   const trimmedEmail = email.trim().toLowerCase();
   const trimmedName = name.trim();
@@ -80,7 +89,20 @@ export async function signUpUserWithSupabase(
     });
 
     if (error) {
-      return { success: false, error: error.message };
+      const msg = error.message || '';
+      if (
+        msg.toLowerCase().includes('weak') ||
+        msg.toLowerCase().includes('least 8') ||
+        msg.toLowerCase().includes('should contain') ||
+        msg.toLowerCase().includes('pwned') ||
+        msg.toLowerCase().includes('compromised')
+      ) {
+        return {
+          success: false,
+          error: `Password rejected by security policy: ${msg}`,
+        };
+      }
+      return { success: false, error: msg };
     }
 
     if (!data.user) {
@@ -95,19 +117,35 @@ export async function signUpUserWithSupabase(
     };
 
     if (data.session) {
-      // Auto-confirmed or confirmations disabled
+      // Auto-confirmed or confirmations disabled in Supabase
       persistSupabaseUser(appUser);
       // Trigger profile creation
       fetch('/api/auth/profile').catch(() => {});
       return { success: true, user: appUser };
-    } else {
-      // Email confirmation required
-      return {
-        success: true,
-        needsEmailVerification: true,
-        user: appUser,
-      };
     }
+
+    // If confirmation is disabled in Supabase, an immediate signInWithPassword will log the user in directly
+    try {
+      const signInRes = await supabase.auth.signInWithPassword({
+        email: trimmedEmail,
+        password,
+      });
+
+      if (signInRes.data?.session && signInRes.data?.user) {
+        persistSupabaseUser(appUser);
+        fetch('/api/auth/profile').catch(() => {});
+        return { success: true, user: appUser };
+      }
+    } catch {
+      // Ignore and fallback to confirmation prompt if Supabase requires email verification
+    }
+
+    // Email confirmation required by Supabase project settings
+    return {
+      success: true,
+      needsEmailVerification: true,
+      user: appUser,
+    };
   } catch (err: any) {
     return { success: false, error: err?.message || 'Network error during signup.' };
   }
@@ -167,6 +205,78 @@ export async function signInUserWithSupabase(
 }
 
 /**
+ * Initiates Google OAuth authentication (Sign Up or Sign In) via Supabase Auth using PKCE.
+ * Redirects the user's browser to the Google OAuth consent screen.
+ */
+export async function signInWithGoogle(
+  redirectTarget: string = '/dashboard'
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return {
+      success: false,
+      error:
+        'Supabase is not configured. Please provide NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.',
+    };
+  }
+
+  const supabase = createClient();
+  const origin =
+    typeof window !== 'undefined' && window.location.origin
+      ? window.location.origin
+      : process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+
+  const safeRedirectTarget =
+    redirectTarget &&
+    redirectTarget.startsWith('/') &&
+    !redirectTarget.startsWith('//') &&
+    !redirectTarget.startsWith('/\\')
+      ? redirectTarget
+      : '/dashboard';
+
+  const callbackUrl = `${origin}/api/auth/callback?next=${encodeURIComponent(safeRedirectTarget)}`;
+
+  try {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: callbackUrl,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'select_account',
+        },
+      },
+    });
+
+    if (error) {
+      const msg = error.message || '';
+      if (
+        msg.toLowerCase().includes('not enabled') ||
+        msg.toLowerCase().includes('unsupported provider') ||
+        msg.toLowerCase().includes('disabled')
+      ) {
+        return {
+          success: false,
+          error:
+            'Google Sign-In is not yet enabled in your Supabase project. Please configure and enable the Google provider in your Supabase Dashboard under Authentication > Providers > Google.',
+        };
+      }
+      return { success: false, error: msg };
+    }
+
+    if (typeof window !== 'undefined' && data?.url) {
+      window.location.href = data.url;
+    }
+
+    return { success: true, url: data?.url };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Failed to initiate Google authentication.',
+    };
+  }
+}
+
+/**
  * Signs out the current user from Supabase and clears all local auth tokens and cookies.
  */
 export async function signOutUserFromSupabase(): Promise<void> {
@@ -206,6 +316,7 @@ export async function signOutUserFromSupabase(): Promise<void> {
     try {
       if (typeof document !== 'undefined') {
         document.cookie = 'notionwell_demo_session=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
+        document.cookie = 'notionwell_auth_user=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
         const cookieList = document.cookie.split(';');
         for (const c of cookieList) {
           const eqIdx = c.indexOf('=');
@@ -253,6 +364,54 @@ export async function resetPasswordWithSupabase(email: string): Promise<{ succes
 }
 
 /**
+ * Updates the authenticated user's password (e.g. following password reset recovery).
+ * Enforces the strong password policy and handles backend security errors.
+ */
+export async function updatePasswordWithSupabase(
+  newPassword: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase is not configured.' };
+  }
+
+  if (!isPasswordValid(newPassword)) {
+    return {
+      success: false,
+      error:
+        'Password does not meet security requirements. It must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, one number, and one special character.',
+    };
+  }
+
+  const supabase = createClient();
+  try {
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+
+    if (error) {
+      const msg = error.message || '';
+      if (
+        msg.toLowerCase().includes('weak') ||
+        msg.toLowerCase().includes('least 8') ||
+        msg.toLowerCase().includes('should contain') ||
+        msg.toLowerCase().includes('pwned') ||
+        msg.toLowerCase().includes('compromised')
+      ) {
+        return {
+          success: false,
+          error: `Password rejected by security policy: ${msg}`,
+        };
+      }
+      return { success: false, error: msg };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Password update failed.' };
+  }
+}
+
+/**
  * Global Supabase Auth listener to keep browser auth state in sync across tabs and page refreshes.
  */
 let isListenerInitialized = false;
@@ -263,6 +422,23 @@ export function initSupabaseAuthListener(): void {
 
   isListenerInitialized = true;
   const supabase = createClient();
+
+  // Immediately check session on init to prime persisted user if cookie session exists
+  supabase.auth.getSession().then(({ data: { session } }) => {
+    if (session?.user) {
+      const appUser: User = {
+        id: session.user.id,
+        name:
+          session.user.user_metadata?.full_name ||
+          session.user.user_metadata?.name ||
+          session.user.email?.split('@')[0] ||
+          'Student',
+        email: session.user.email || '',
+        createdAt: session.user.created_at || new Date().toISOString(),
+      };
+      persistSupabaseUser(appUser);
+    }
+  }).catch(() => {});
 
   supabase.auth.onAuthStateChange((event, session) => {
     if (session?.user) {

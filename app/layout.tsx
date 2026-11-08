@@ -1,21 +1,11 @@
 import type { Metadata } from 'next';
-import { Inter, Outfit } from 'next/font/google';
 import './globals.css';
 import AppShell from '@/components/AppShell';
 import BadgeToast from '@/components/BadgeToast';
 import SupabaseAuthSync from '@/components/SupabaseAuthSync';
 
-const inter = Inter({
-  subsets: ['latin'],
-  display: 'swap',
-  variable: '--font-sans',
-});
-
-const outfit = Outfit({
-  subsets: ['latin'],
-  display: 'swap',
-  variable: '--font-heading',
-});
+const inter = { variable: '--font-sans' };
+const outfit = { variable: '--font-heading' };
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://notionwell.vercel.app'),

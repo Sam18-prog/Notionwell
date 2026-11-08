@@ -1698,6 +1698,25 @@ export function getCurrentUser(): User | null {
         };
       }
     }
+
+    // Check if session was just established via OAuth cookie
+    if (typeof document !== 'undefined' && document.cookie.includes('notionwell_auth_user=')) {
+      const match = document.cookie.match(/notionwell_auth_user=([^;]+)/);
+      if (match && match[1]) {
+        const decoded = decodeURIComponent(match[1]);
+        const parsed = JSON.parse(decoded);
+        if (parsed && parsed.id && parsed.email) {
+          const userObj: User = {
+            id: parsed.id,
+            name: parsed.name || parsed.email.split('@')[0] || 'Student',
+            email: parsed.email,
+            createdAt: parsed.createdAt || new Date().toISOString(),
+          };
+          localStorage.setItem('notionwell_user_v1', JSON.stringify(userObj));
+          return userObj;
+        }
+      }
+    }
   } catch {}
 
   // 2. Demo guest session check
